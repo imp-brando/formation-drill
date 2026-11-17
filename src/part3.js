@@ -152,7 +152,7 @@ function parseCommand(text){
       for(const c of CMDS){
         if(c.exec!==cls || c.single) continue;
         if(c.id==="halt"||c.id==="attn"){ // unit word optional on Easy
-          if(new RegExp(UNIT).test(prep) || (settings.sens==="easy" && prep.length===0)) return {cmd:c, prep};
+          if(new RegExp(UNIT).test(prep) || ((settings.sens==="recruit"||settings.sens==="none") && prep.length===0)) return {cmd:c, prep};
           continue;
         }
         if(c.re && new RegExp(c.re).test(prep)) return {cmd:c, prep};
@@ -164,20 +164,36 @@ function parseCommand(text){
 
 /* ======================================================================
    SETTINGS & PERSISTENCE
+   Difficulty levels (saved in localStorage "formation.sens"):
+     none    = Commands only: no inflection check (warm-up)
+     recruit = ANY one emphasis cue on the execution word (default)
+     soldier = any TWO cues
+     ds      = Drill Sergeant: every strict rule
+   The three cues are: louder than the prep, a pitch change, a pause before it.
 ====================================================================== */
-const settings = { sens:"standard", unit:"Platoon", tick:true };
-const SENS = { // inflection thresholds per sensitivity
-  easy:     {minPeak:-52, loud:1, spike:4,  pitch:1.5, maxDur:1100, attack:400, prepRise:-99, gap:0,  foot:"ignore", needAttn:false},
-  standard: {minPeak:-45, loud:3, spike:7,  pitch:2.5, maxDur:750,  attack:220, prepRise:-99, gap:40, foot:"warn",   needAttn:true},
-  ds:       {minPeak:-38, loud:6, spike:10, pitch:3.5, maxDur:520,  attack:130, prepRise:0.5, gap:80, foot:"reject", needAttn:true},
+const SENS = {
+  none:    {label:"Commands only", cues:0, loud:0,   pitch:0,   gap:0,   foot:"ignore", needAttn:false},
+  recruit: {label:"Recruit",       cues:1, loud:2.5, pitch:1.0, gap:80,  foot:"ignore", needAttn:false},
+  soldier: {label:"Soldier",       cues:2, loud:3.0, pitch:1.5, gap:120, foot:"warn",   needAttn:true},
+  ds:      {label:"Drill Sergeant",cues:3, loud:6.0, pitch:3.0, gap:80,  foot:"reject", needAttn:true,
+            strict:{maxDur:600, attack:150, prepRise:0.5}},
 };
+function loadSens(){
+  const v=localStorage.getItem("formation.sens");
+  if(v && SENS[v] && localStorage.getItem("formation.sensVer")==="2") return v;
+  // first run, or a setting saved by the old easy/standard/ds version: start on Recruit
+  localStorage.setItem("formation.sens","recruit"); localStorage.setItem("formation.sensVer","2");
+  return "recruit";
+}
+function saveSens(v){ if(SENS[v]){ localStorage.setItem("formation.sens",v); localStorage.setItem("formation.sensVer","2"); } }
+const settings = { sens:loadSens(), unit:"Platoon", tick:true };
 let hiScore = +localStorage.getItem("formation.hi") || 0;
 
 /* ======================================================================
    AUDIO: step ticks + mic analysis (pitch and loudness)
 ====================================================================== */
 let actx=null, analyser=null, micStream=null, micOK=false, audioBuf=null;
-const frames=[];             // ring of {t, db, hz}, ~25 ms apart, last 8 s
+const frames=[];             // ring of {t, db, rel, hz}, ~25 ms apart, last 8 s (rel = dB above noise floor)
 let noiseFloor=-60, lastLoudT=0;
 function ensureAudio(){
   if(!actx){ const AC=window.AudioContext||window.webkitAudioContext; if(AC) actx=new AC(); }
@@ -196,34 +212,48 @@ function chime(ok){
   g.gain.setValueAtTime(.1,t); g.gain.exponentialRampToValueAtTime(.0001,t+.18); o.connect(g).connect(actx.destination); o.start(t); o.stop(t+.2);
 }
 async function startMic(){
-  try{
-    // Auto gain control is OFF on purpose: it would flatten the loudness jump we measure.
-    micStream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:false, autoGainControl:false}});
-    const src=actx.createMediaStreamSource(micStream);
-    analyser=actx.createAnalyser(); analyser.fftSize=2048; analyser.smoothingTimeConstant=0;
-    src.connect(analyser); audioBuf=new Float32Array(analyser.fftSize); micOK=true;
-    setInterval(analyseFrame, 25);
-    return true;
-  }catch(e){
-    micOK=false; const n=$("noMic");
-    n.textContent="Microphone unavailable ("+e.name+"), so inflection can't be measured. Allow mic access and open the page over HTTPS."; n.classList.add("on");
-    return false;
+  // Raw audio is preferred (processing would flatten the emphasis we measure), but fall back
+  // to whatever the browser gives us rather than failing.
+  const tries=[
+    {audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}},
+    {audio:{echoCancellation:{ideal:false}, noiseSuppression:{ideal:false}, autoGainControl:{ideal:false}}},
+    {audio:true},
+  ];
+  let lastErr=null;
+  for(const c of tries){
+    try{ micStream=await navigator.mediaDevices.getUserMedia(c); break; }
+    catch(e){ lastErr=e; if(e.name==="NotAllowedError"||e.name==="SecurityError") break; }
   }
+  if(!micStream){
+    micOK=false; const n=$("noMic");
+    n.textContent="Microphone unavailable ("+(lastErr&&lastErr.name)+"). Commands still work, but inflection can't be measured. Allow mic access to use the inflection check.";
+    n.classList.add("on"); return false;
+  }
+  const src=actx.createMediaStreamSource(micStream);
+  analyser=actx.createAnalyser(); analyser.fftSize=2048; analyser.smoothingTimeConstant=0;
+  src.connect(analyser); audioBuf=new Float32Array(analyser.fftSize); micOK=true;
+  setInterval(analyseFrame, 25);
+  return true;
 }
-/** One analysis frame: RMS level (dBFS) and autocorrelation pitch (Hz) */
+/** One analysis frame: RMS level (dBFS), level above the noise floor, and pitch (Hz) */
 function analyseFrame(){
   analyser.getFloatTimeDomainData(audioBuf);
   let sum=0; for(let i=0;i<audioBuf.length;i++) sum+=audioBuf[i]*audioBuf[i];
   const rms=Math.sqrt(sum/audioBuf.length), db=20*Math.log10(rms+1e-9);
   const t=now()-(analyser.fftSize/actx.sampleRate)*500; // centre of the analysis window
-  const hz = db>noiseFloor+8 ? detectPitch(audioBuf, actx.sampleRate) : 0;
-  frames.push({t,db,hz}); while(frames.length && frames[0].t<t-8000) frames.shift();
+  const hz = db>noiseFloor+6 ? detectPitch(audioBuf, actx.sampleRate) : 0;
+  pushFrame(t, db, hz);
   // adaptive noise floor: falls fast, rises slowly
   noiseFloor = db<noiseFloor ? lerp(noiseFloor,db,.3) : lerp(noiseFloor,db,.004);
   noiseFloor = clamp(noiseFloor,-90,-35);
-  if(db>voiceThresh()) lastLoudT=t;
 }
-const voiceThresh = ()=> Math.max(noiseFloor+10, -58);
+function pushFrame(t, db, hz){
+  frames.push({t, db, rel:db-noiseFloor, hz});
+  while(frames.length && frames[0].t<t-8000) frames.shift();
+  if(db-noiseFloor>VOICE_REL) lastLoudT=t;
+}
+const VOICE_REL = 9;                                     // voiced = 9 dB above the noise floor
+const voiceThresh = ()=> noiseFloor+VOICE_REL;           // (absolute dB, for the meter line)
 /** Normalised autocorrelation on a 2x-decimated buffer, 70–450 Hz. Returns 0 if unvoiced. */
 function detectPitch(buf, sr){
   const N=buf.length>>1, x=new Float32Array(N);
@@ -238,55 +268,123 @@ function detectPitch(buf, sr){
     if(rising && v>best){ best=v; bestLag=lag; }
     prev=v;
   }
-  if(best<0.55||!bestLag) return 0;
+  if(best<0.5||!bestLag) return 0;
   const a=r[bestLag-1]??best, b=best, c=r[bestLag+1]??best, den=(a-2*b+c)||1, p=(a-c)/(2*den);
   return fs/(bestLag+clamp(p,-.5,.5));      // parabolic interpolation
 }
 const semis = (a,b)=> 12*Math.log2(a/b);
 const median = arr => { if(!arr.length) return 0; const s=[...arr].sort((a,b)=>a-b); return s[s.length>>1]; };
+/** Fold an interval into ±6 semitones when it looks like an octave error (pitch trackers often halve/double). */
+const foldOctave = st => Math.abs(st)>8 ? st-12*Math.round(st/12) : st;
 
-/** Split recent audio into voiced segments: [{t0,t1,peak,peakT,fr}] */
+/** Clean a run of frames' pitch: 5-point median filter, then octave-correct each value
+    against the run's median (snap 2x / 0.5x jumps back). */
+function cleanPitch(fr){
+  const raw=fr.map(f=>f.hz), out=[];
+  for(let i=0;i<raw.length;i++){
+    if(!raw[i]){ out.push(0); continue; }
+    const w=raw.slice(Math.max(0,i-2), i+3).filter(Boolean);
+    out.push(median(w));
+  }
+  const ref=median(out.filter(Boolean));
+  return out.map(h=>{ if(!h||!ref) return h; let st=semis(h,ref); while(st>8){ h/=2; st-=12; } while(st<-8){ h*=2; st+=12; } return h; });
+}
+
+/** Split recent audio into voiced bursts (relative to the noise floor): [{t0,t1,peak,peakT,fr}] */
 function segmentsBetween(tA,tB){
-  const th=voiceThresh(), segs=[]; let cur=null, quiet=0;
+  const segs=[]; let cur=null, quiet=0;
   for(const f of frames){
     if(f.t<tA||f.t>tB) continue;
-    if(f.db>th){ if(!cur) cur={t0:f.t,t1:f.t,peak:f.db,peakT:f.t,fr:[]}; cur.t1=f.t; cur.fr.push(f); if(f.db>cur.peak){cur.peak=f.db;cur.peakT=f.t;} quiet=0; }
-    else if(cur){ quiet+=25; if(quiet>90){ segs.push(cur); cur=null; quiet=0; } }
+    if(f.rel>VOICE_REL){ if(!cur) cur={t0:f.t,t1:f.t,peak:f.rel,peakT:f.t,fr:[]}; cur.t1=f.t; cur.fr.push(f); if(f.rel>cur.peak){cur.peak=f.rel;cur.peakT=f.t;} quiet=0; }
+    else if(cur){ quiet+=25; if(quiet>=75){ segs.push(cur); cur=null; quiet=0; } }   // ≥75 ms of quiet ends a burst
   }
   if(cur) segs.push(cur);
-  return segs.filter(s=>s.t1-s.t0>=50);
+  return segs.filter(s=>s.t1-s.t0>=40);
 }
+/** If speech ran together into one burst, split off the final ~40% (max 450 ms) as the execution word. */
+function splitRunTogether(seg){
+  const dur=seg.t1-seg.t0, cut=seg.t1-Math.min(450, dur*.4);
+  const mk=fr=>{ const p=fr.reduce((m,f)=>f.rel>m.rel?f:m, fr[0]); return {t0:fr[0].t,t1:fr[fr.length-1].t,peak:p.rel,peakT:p.t,fr}; };
+  const a=seg.fr.filter(f=>f.t<cut), b=seg.fr.filter(f=>f.t>=cut);
+  return (a.length>=3 && b.length>=3) ? [mk(a), mk(b)] : null;
+}
+const energyMean = fr => 10*Math.log10(fr.reduce((a,f)=>a+Math.pow(10,f.rel/10),0)/Math.max(1,fr.length));
 
-/** Inflection check. Command of execution = the last voiced segment; prep = the segments before it.
-    Requires a louder execution (peak above the prep's average), a short abrupt delivery, and an
-    inflection: a pitch change of N semitones OR a sharp energy spike. */
-function analyseInflection(cmd, heardAt){
-  const S=SENS[settings.sens];
-  if(!micOK) return {ok:true, warn:"Inflection not measured (no mic level)"};
-  const from=Math.max(heardAt-5000, ttsQuietSince);
-  const segs=segmentsBetween(from, now());
+/** Measure how the command of execution was emphasised. Returns metrics or a reason it couldn't. */
+function measureEmphasis(heardAt){
+  if(!micOK) return {unavailable:"no mic level"};
+  const from=Math.max(heardAt-6000, ttsQuietSince), to=Math.min(now(), heardAt+1000);
+  let segs=segmentsBetween(from, to);
   if(!segs.length){
-    // Some Android builds silence getUserMedia while speech recognition runs.
-    if(!frames.some(f=>f.t>from && f.db>-85)) return {ok:true, warn:"Mic level blocked during recognition (device limit). Inflection not measured."};
-    return {ok:false, reason:"Too soft", detail:"Couldn't pick out your voice over the background noise"};
+    // Some Android builds silence the mic stream while speech recognition is running.
+    if(!frames.some(f=>f.t>from && f.rel>3)) return {unavailable:"mic level blocked during recognition"};
+    return {unavailable:"voice not separated from background noise"};
   }
-  const ex=segs[segs.length-1];
-  const prepSegs=segs.slice(0,-1).filter(s=>s.t0>ex.t0-3800);
-  if(!prepSegs.length) return {ok:false, reason:"No preparatory command", detail:"Give the prep, pause, then the command of execution", ex, prepSegs};
+  // Execution word = the LOUDEST burst among those ending in the final ~1.2 s of speech (ties → the later one).
+  const lastEnd=segs[segs.length-1].t1;
+  let exIdx=segs.length-1;
+  for(let i=segs.length-1;i>=0;i--){ if(segs[i].t1<lastEnd-1200) break; if(segs[i].peak>segs[exIdx].peak+1) exIdx=i; }
+  let ex=segs[exIdx], prepSegs=segs.slice(0,exIdx).filter(s=>s.t0>ex.t0-4000), merged=false;
+  if(!prepSegs.length){
+    const sp=splitRunTogether(ex);
+    if(!sp) return {unavailable:"couldn't separate the prep from the execution", ex};
+    prepSegs=[sp[0]]; ex=sp[1]; merged=true;
+  }
   const prepFr=prepSegs.flatMap(s=>s.fr);
-  const prepMean=10*Math.log10(prepFr.reduce((a,f)=>a+Math.pow(10,f.db/10),0)/prepFr.length);
-  const loud=ex.peak-prepMean, dur=ex.t1-ex.t0, attack=ex.peakT-ex.t0, gap=ex.t0-prepSegs[prepSegs.length-1].t1;
-  const pP=prepFr.filter(f=>f.hz).map(f=>f.hz), eP=ex.fr.filter(f=>f.hz).map(f=>f.hz);
+  const loud = ex.peak - energyMean(prepFr);                 // dB, both relative to the noise floor
+  const gap  = merged ? 0 : ex.t0 - prepSegs[prepSegs.length-1].t1;
+  const pP=cleanPitch(prepFr).filter(Boolean), eP=cleanPitch(ex.fr).filter(Boolean);
   const third=Math.max(1,Math.floor(pP.length/3));
   const prepStart=median(pP.slice(0,third)), prepEnd=median(pP.slice(-third)), execHz=median(eP);
-  const pitchDelta = (prepEnd&&execHz)? semis(execHz,prepEnd) : 0;
-  const prepRise = (prepStart&&prepEnd)? semis(prepEnd,prepStart) : 0;
-  const fmt=`Exec ${loud>=0?"+":""}${loud.toFixed(1)} dB · pitch ${pitchDelta>=0?"+":""}${pitchDelta.toFixed(1)} st · ${Math.round(dur)} ms`;
-  const res=(ok,reason,detail)=>({ok,reason,detail:detail?detail+" · "+fmt:fmt,ex,prepSegs,m:{loud,dur,attack,pitchDelta,prepRise,gap}});
-  if(ex.peak<S.minPeak || loud<S.loud) return res(false,"Too soft","The execution must be louder than the prep");
-  if(gap<S.gap) return res(false,"No pause","Pause between the prep and the execution");
-  if(dur>S.maxDur || attack>S.attack) return res(false,"Drawn out","Snap the execution word: short and sharp");
-  if(!(Math.abs(pitchDelta)>=S.pitch || loud>=S.spike)) return res(false,"No inflection","Raise the prep, then a distinct drop or a sharp punch on the execution");
-  if(prepRise<S.prepRise && loud<S.spike+3) return res(false,"Flat prep","Raise your pitch through the preparatory command");
-  return res(true,"ACCEPTED");
+  const pitch = (prepEnd&&execHz) ? foldOctave(semis(execHz,prepEnd)) : null;   // null = no pitch measured
+  const prepRise = (prepStart&&prepEnd) ? foldOctave(semis(prepEnd,prepStart)) : 0;
+  return {ex, prepSegs, merged, loud, gap, pitch, prepRise, dur:ex.t1-ex.t0, attack:ex.peakT-ex.t0};
 }
+
+/** Judge inflection for the current difficulty. Returns {ok, reason, hint, checks:[...], ...}.
+    checks = [{name, got, need, pass}] so the UI can show measured vs needed values. */
+function analyseInflection(cmd, heardAt){
+  const lvl=settings.sens, S=SENS[lvl];
+  if(lvl==="none") return {ok:true, detail:"Commands only: no inflection check"};
+  const m=measureEmphasis(heardAt);
+  if(m.unavailable){
+    if(lvl==="ds") return {ok:false, reason:"Couldn't hear inflection", hint:"Speak up and pause briefly before the last word ("+m.unavailable+")", ex:m.ex, checks:[]};
+    return {ok:true, warn:"Inflection not measured ("+m.unavailable+"), accepted", ex:m.ex};
+  }
+  const ck=[
+    {key:"loud",  name:"Louder", got:m.loud, need:S.loud, unit:"dB", pass:m.loud>=S.loud},
+    {key:"pitch", name:"Pitch",  got:m.pitch, need:S.pitch, unit:"st", pass:m.pitch!==null && Math.abs(m.pitch)>=S.pitch},
+    {key:"gap",   name:"Pause",  got:m.gap, need:S.gap, unit:"ms", pass:m.gap>=S.gap},
+  ];
+  if(lvl==="ds"){
+    const st=S.strict;
+    ck.push({key:"dur", name:"Short", got:m.dur, need:st.maxDur, unit:"ms", max:true, pass:m.dur<=st.maxDur});
+    ck.push({key:"attack", name:"Sharp", got:m.attack, need:st.attack, unit:"ms", max:true, pass:m.attack<=st.attack});
+    ck.push({key:"rise", name:"Prep rise", got:m.prepRise, need:st.prepRise, unit:"st", pass:m.prepRise>=st.prepRise});
+  }
+  const passed=ck.slice(0,3).filter(c=>c.pass).length;
+  const ok = lvl==="ds" ? ck.every(c=>c.pass) : passed>=S.cues;
+  const base={ok, ex:m.ex, prepSegs:m.prepSegs, checks:ck, metrics:m, need:S.cues};
+  const summary=ck.map(c=>`${c.pass?"✓":"✗"} ${c.name} ${fmtVal(c)}`).join(" · ");
+  if(ok) return Object.assign(base,{reason:"ACCEPTED", detail:summary});
+  // Coaching: suggest the cue that's closest to passing first
+  const failing=ck.filter(c=>!c.pass).sort((a,b)=>closeness(b)-closeness(a));
+  const want = lvl==="ds" ? "all checks" : (S.cues===1? "one cue" : S.cues+" cues")+` (got ${passed})`;
+  return Object.assign(base,{reason: passed===0 && lvl!=="ds" ? "No emphasis" : "More emphasis needed",
+    hint: failing.slice(0, lvl==="ds"?2:Math.max(1,S.cues-passed)).map(c=>HINTS[c.key]).join(" "),
+    detail:`Needs ${want}: ${summary}`});
+}
+const HINTS = {
+  loud:"Punch the last word louder.",
+  pitch:"Change pitch on the last word: let the prep rise, then drop (or snap up) on the execution.",
+  gap:"Pause briefly before the last word.",
+  dur:"Keep the last word short.",
+  attack:"Hit the last word sharply, all at once.",
+  rise:"Raise your pitch through the preparatory command.",
+};
+function fmtVal(c){
+  if(c.got===null||c.got===undefined) return `n/a (need ${c.max?"≤":"≥"}${c.need}${c.unit})`;
+  const v = c.unit==="ms" ? Math.round(c.got) : (c.key==="pitch"? Math.abs(c.got):c.got).toFixed(1);
+  return `${c.unit!=="ms"&&c.key!=="pitch"&&c.got>=0?"+":""}${v}${c.unit} (need ${c.max?"≤":"≥"}${c.need})`;
+}
+function closeness(c){ if(c.got===null) return -1; const g=c.key==="pitch"?Math.abs(c.got):c.got; return c.max? c.need/Math.max(g,1) : g/Math.max(c.need,0.01); }

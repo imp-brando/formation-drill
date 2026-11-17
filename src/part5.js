@@ -101,6 +101,19 @@ function drawMeter(){
   for(const f of frames){ if(f.t<t1-span||!f.hz) continue; const y=H-clamp(Math.log2(f.hz/70)/Math.log2(450/70),0,1)*H; mctx.fillStyle="#ff9d3a"; mctx.fillRect(X(f.t)-1.5,y-1.5,3,3); }
   mctx.fillStyle="rgba(230,220,195,.75)"; mctx.font="10px system-ui"; mctx.fillText("pitch ●   volume ▮   prep ▭ blue · exec ▭ green/red", 4, 11);
   if(!micOK){ mctx.fillStyle="#ff9d8a"; mctx.fillText("mic off: inflection not measured", 4, H-5); }
+  // measured vs needed for the last command (transparency)
+  if(lastAnalysis && lastAnalysis.checks && lastAnalysis.checks.length){
+    mctx.fillStyle="rgba(12,14,5,.88)"; mctx.fillRect(0,H-32,W,32);   // readable backdrop for the values
+    mctx.font="bold 11px system-ui"; let x=4, y=H-19;
+    const lbl=SENS[settings.sens].label+(settings.sens==="ds"?" (all):":" ("+lastAnalysis.need+" of 3):")+" ";
+    mctx.fillStyle="rgba(230,220,195,.9)"; mctx.fillText(lbl, x, y); x+=mctx.measureText(lbl).width;
+    for(const c of lastAnalysis.checks){
+      const g=c.got===null||c.got===undefined? "n/a" : c.unit==="ms"? Math.round(c.got)+"ms" : (c.key==="pitch"?Math.abs(c.got):c.got).toFixed(1)+c.unit;
+      const s=`${c.pass?"✓":"✗"} ${c.name} ${g} / ${c.max?"≤":"≥"}${c.need}   `, w=mctx.measureText(s).width;
+      if(x+w>W && y<H-10){ x=4; y=H-5; }                     // wrap onto a second row
+      mctx.fillStyle=c.pass?"#9be37f":"#ff9d8a"; mctx.fillText(s, x, y); x+=w;
+    }
+  } else { mctx.fillStyle="rgba(230,220,195,.6)"; mctx.font="10px system-ui"; mctx.fillText("Level: "+SENS[settings.sens].label, W-110, 11); }
 }
 
 /* ======================================================================
@@ -171,7 +184,7 @@ function reportVerdict(c,a,fc){
     chime(true);
   } else {
     el.className="bad"; el.textContent = a.reason.toUpperCase()+": "+c.name;
-    $("detail").textContent = a.detail||""; chime(false);
+    $("detail").textContent = (a.hint? a.hint+" " : "") + (a.detail||""); chime(false);
   }
 }
 function flash(msg,cls,detail){ const el=$("verdict"); el.className=cls; el.textContent=msg; $("detail").textContent=detail||""; }
@@ -270,7 +283,7 @@ function step(t){
 }
 function frame(){ if(!running) return; step(now()); requestAnimationFrame(frame); }
 async function begin(mode){
-  settings.sens=$("sens").value; settings.unit=$("unitWord").value; settings.tick=$("tickOn").checked;
+  settings.sens=$("sens").value; saveSens(settings.sens); settings.unit=$("unitWord").value; settings.tick=$("tickOn").checked;
   ensureAudio();
   if(!micOK && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) await startMic();
   if(!recOn) startRecognition();
@@ -296,6 +309,8 @@ if(DEBUG) $("debug").classList.add("on");
 const dbgSend=()=>{ const v=$("dbgIn").value, p=parseCommand(v); $("heardTxt").textContent=v; if(!p) return flash("NOT A VALID COMMAND","bad",v); judge(p,v,now(),true); $("dbgIn").value=""; };
 $("dbgGo").onclick=dbgSend; $("dbgIn").addEventListener("keydown",e=>{ if(e.key==="Enter") dbgSend(); });
 $("hiStart").textContent=hiScore;
+$("sens").value=settings.sens;                                   // restore saved difficulty (default Recruit)
+$("sens").addEventListener("change",()=>{ settings.sens=$("sens").value; saveSens(settings.sens); });
 fillCadences(); buildReference();
 
 /* ---------- Test hook (automated tests only; not used in normal play) ---------- */
@@ -310,5 +325,6 @@ window.FG = {
              heading:Math.round(((F.mode==="column"?F.path.posAt(F.ranks[0].s).h:0)/D2R%360+360)%360),
              soldiers:allSoldiers().map(s=>[+s.x.toFixed(2),+s.y.toFixed(2),Math.round(((s.face/D2R)%360+360)%360)])}),
   get G(){return G;}, get F(){return F;}, clock, settings, frames,
-  analyse:(id,t)=>{ micOK=true; return analyseInflection(CMD[id], t); },
+  analyse:(id,t)=>{ micOK=true; return analyseInflection(CMD[id], t); }, pushFrame, setFloor:v=>{noiseFloor=v;},
+  showAnalysis:a=>{ lastAnalysis=a; },
 };

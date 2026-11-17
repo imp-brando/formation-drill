@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#3b4220">
+<title>Formation — Voice Drill &amp; Ceremony Trainer</title>
+<style>
+/* ===== Military palette & base ===== */
+:root{
+  --olive:#4b5320; --olive-d:#2f3414; --olive-l:#6b7536; --khaki:#c3b091; --khaki-l:#e6dcc3;
+  --red:#b3392b; --ink:#1b1d0e;
+  --stencil: "Stencil", "Stencil Std", "Saddlebag", "Army", Impact, "Haettenschweiler", "Arial Narrow Bold", "Arial Black", sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--olive-d);color:var(--khaki-l);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overscroll-behavior:none}
+body{display:flex;justify-content:center}
+#app{width:100%;max-width:520px;height:100%;position:relative;overflow:hidden}
+h1,h2,h3,.stencil{font-family:var(--stencil);letter-spacing:.08em;text-transform:uppercase;margin:0}
+button{font-family:var(--stencil);letter-spacing:.06em;text-transform:uppercase;border:2px solid var(--khaki);background:var(--olive);color:var(--khaki-l);padding:12px 14px;border-radius:6px;font-size:16px;cursor:pointer}
+button:active{transform:translateY(1px);background:var(--olive-l)}
+button.primary{background:var(--khaki);color:var(--ink);border-color:var(--khaki-l)}
+button.small{padding:6px 9px;font-size:12px}
+select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);color:var(--ink);border:1px solid var(--khaki)}
+.screen{position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto}
+.screen.on{display:flex}
+#start{padding:18px 16px calc(18px + env(safe-area-inset-bottom));gap:12px;background:
+  repeating-linear-gradient(45deg,rgba(0,0,0,.05) 0 10px,transparent 10px 20px),var(--olive-d)}
+.logo{border:3px solid var(--khaki);padding:10px;text-align:center;border-radius:4px}
+.logo h1{font-size:34px;color:var(--khaki-l)}
+.logo div{font-size:12px;letter-spacing:.2em;color:var(--khaki)}
+.card{background:rgba(0,0,0,.25);border:1px solid rgba(195,176,145,.35);border-radius:8px;padding:10px 12px;font-size:14px;line-height:1.4}
+.card b{color:#fff}
+.modes{display:grid;grid-template-columns:1fr;gap:8px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.notice{background:#5a2018;border:1px solid var(--red);color:#ffd9d0;padding:8px 10px;border-radius:6px;font-size:13px;display:none}
+.notice.on{display:block}
+#ref{padding:14px;gap:10px;background:var(--olive-d)}
+#ref table{width:100%;border-collapse:collapse;font-size:13px}
+#ref th,#ref td{border-bottom:1px solid rgba(195,176,145,.25);padding:6px 4px;text-align:left;vertical-align:top}
+#ref th{font-family:var(--stencil);color:var(--khaki);letter-spacing:.06em}
+#ref td.cmd{font-weight:700;color:#fff}
+.tag{display:inline-block;font-size:11px;padding:1px 5px;border-radius:3px;background:var(--olive);border:1px solid var(--khaki);margin-right:3px}
+#game{background:var(--olive-d);overflow:hidden}
+#hud{display:flex;justify-content:space-between;align-items:center;padding:6px 10px 4px;gap:6px;background:var(--olive);border-bottom:2px solid var(--khaki)}
+#hud .stat{font-family:var(--stencil);font-size:15px;letter-spacing:.06em}
+#hud .stat small{display:block;font-size:10px;color:var(--khaki);letter-spacing:.12em}
+#fieldWrap{flex:1;position:relative;min-height:0}
+#field{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+#footInd{position:absolute;left:8px;top:8px;display:flex;gap:4px}
+#footInd span{font-family:var(--stencil);font-size:13px;padding:3px 7px;border-radius:4px;background:rgba(0,0,0,.35);color:var(--khaki);border:1px solid rgba(195,176,145,.4)}
+#footInd span.hit{background:var(--khaki);color:var(--ink)}
+#stateTag{position:absolute;right:8px;top:8px;font-family:var(--stencil);font-size:12px;background:rgba(0,0,0,.4);padding:3px 7px;border-radius:4px;color:var(--khaki-l);text-align:right}
+#overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(20,22,8,.78);flex-direction:column;gap:12px;text-align:center;padding:20px}
+#overlay.on{display:flex}
+#overlay h2{font-size:30px;color:#ffd9a0}
+#panel{background:var(--olive);border-top:2px solid var(--khaki);padding:6px 8px calc(6px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:5px}
+#meter{width:100%;height:64px;display:block;background:#1d2010;border-radius:5px}
+#verdict{font-family:var(--stencil);font-size:19px;letter-spacing:.05em;min-height:24px}
+#verdict.ok{color:#9be37f} #verdict.bad{color:#ff9d8a} #verdict.warn{color:#ffd27a}
+#detail{font-size:12px;color:var(--khaki);min-height:15px}
+#heard{font-size:12px;color:#e9e3d0;opacity:.85;min-height:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#heard i{color:var(--khaki)}
+#cadBar{border-top:1px dashed rgba(195,176,145,.4);padding-top:5px}
+#cadBar .row{gap:6px}
+#cadLines{font-size:13px;line-height:1.35;margin-top:4px}
+#cadLines .call{color:#fff}
+#cadLines .resp{color:var(--khaki)}
+#cadLines .now{background:var(--khaki);color:var(--ink);border-radius:3px;padding:0 3px}
+#cadLines .lic{font-size:10px;color:var(--khaki);opacity:.8}
+#cadBar.collapsed #cadBody,#cadBar.collapsed #cadLines{display:none}
+#debug{display:none;gap:4px}
+#debug.on{display:flex}
+#debug input{flex:1;font-size:14px;padding:6px}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- ================= START SCREEN ================= -->
+<section id="start" class="screen on">
+  <div class="logo"><h1>Formation</h1><div>Voice Drill &amp; Ceremony Trainer</div></div>
+  <div id="noSR" class="notice"><b>Speech recognition isn't available in this browser.</b> Use Chrome on Android, or Safari on iOS 14.5 or later, over HTTPS. Inflection Practice still works.</div>
+  <div id="noMic" class="notice"></div>
+  <div class="card">
+    <b>Command your formation by voice.</b> Every command needs a <b>preparatory command</b> ("Column right…"), a short pause, then a sharp, louder <b>command of execution</b> ("MARCH!"). Call the execution word on the correct foot. Watch the <b>LEFT/RIGHT</b> indicator.
+  </div>
+  <div class="card row" style="justify-content:space-between">
+    <label>Sensitivity
+      <select id="sens">
+        <option value="easy">Easy</option>
+        <option value="standard" selected>Standard</option>
+        <option value="ds">Drill Sergeant</option>
+      </select>
+    </label>
+    <label>Unit
+      <select id="unitWord"><option>Platoon</option><option>Squad</option><option>Flight</option></select>
+    </label>
+    <label><input type="checkbox" id="tickOn" checked> Step tick</label>
+  </div>
+  <div class="modes">
+    <button class="primary" data-mode="snake">▶ Snake Game: tap to start (enables mic)</button>
+    <button data-mode="drill">Drill Practice (open field)</button>
+    <button data-mode="practice">Inflection Practice (no game)</button>
+    <button id="btnRef">Command Reference</button>
+  </div>
+  <div class="card" style="font-size:12px">
+    <b>Quick list:</b> Forward, MARCH · Platoon, HALT · Column right/left, MARCH · Column half right/left, MARCH · Right/Left flank, MARCH · Rear, MARCH · Counter column, MARCH · Mark time, MARCH · Half step, MARCH · Quick/Double time, MARCH · Change step, MARCH · Right/Left step, MARCH · Backward, MARCH · Right/Left/About, FACE · Parade, REST · Stand at, EASE · AT EASE · Platoon, ATTENTION · Dress right, DRESS · Eyes, RIGHT · Ready, FRONT · Open/Close ranks, MARCH · Extend/Close, MARCH · Fall, IN.
+    <br><br><b>Snake:</b> pick up recruits (gold) to grow the formation. Marching into a wall or into your own formation = <b>FORMATION BROKE</b>.
+    <br>High score: <b id="hiStart">0</b>
+  </div>
+</section>
+
+<!-- ================= COMMAND REFERENCE ================= -->
+<section id="ref" class="screen">
+  <div class="row" style="justify-content:space-between"><h2>Command Reference</h2><button class="small" id="refBack">Back</button></div>
+  <div class="card" style="font-size:12px">Based on TC 3-21.5, Drill and Ceremonies. <b>Foot</b> is the foot that should be striking the ground when you call the command of execution. Squad, Platoon, and Flight are all accepted as the unit word.</div>
+  <table id="refTable"><thead><tr><th>Command</th><th>Foot</th><th>What happens</th></tr></thead><tbody></tbody></table>
+</section>
+
+<!-- ================= GAME / DRILL / PRACTICE ================= -->
+<section id="game" class="screen">
+  <div id="hud">
+    <button class="small" id="btnQuit">☰</button>
+    <div class="stat" id="hudScore"><small>Score</small><span id="score">0</span></div>
+    <div class="stat"><small>High</small><span id="hi">0</span></div>
+    <div class="stat"><small>Strength</small><span id="strength">8</span></div>
+    <div class="stat"><small>Cadence</small><span id="bpm">96</span></div>
+  </div>
+  <div id="fieldWrap">
+    <canvas id="field"></canvas>
+    <div id="footInd"><span id="fL">LEFT</span><span id="fR">RIGHT</span></div>
+    <div id="stateTag">AT THE HALT</div>
+    <div id="overlay"><h2 id="ovTitle">Formation broke</h2><div id="ovText"></div><button class="primary" id="ovBtn">Fall in (restart)</button><div style="font-size:12px;color:var(--khaki)">…or say "Platoon… FALL IN!"</div></div>
+  </div>
+  <div id="panel">
+    <canvas id="meter" width="500" height="64"></canvas>
+    <div id="verdict">Waiting for command…</div>
+    <div id="detail"></div>
+    <div id="heard"><i>Heard:</i> <span id="heardTxt">—</span></div>
+    <div id="debug"><input id="dbgIn" placeholder="debug: type a command, e.g. column right march"><button class="small" id="dbgGo">Send</button></div>
+    <div id="cadBar" class="collapsed">
+      <div class="row">
+        <button class="small" id="cadToggle">♪ Cadences</button>
+        <div id="cadBody" class="row" style="flex:1;gap:5px">
+          <select id="cadSel" style="flex:1;min-width:120px"></select>
+          <select id="cadVoice" title="Voice">
+            <option value="text">Text only</option>
+            <option value="calls">Voice: calls</option>
+            <option value="both">Voice: call+resp</option>
+          </select>
+          <button class="small" id="cadPlay">Start</button>
+        </div>
+      </div>
+      <div id="cadLines"></div>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- =====================================================================
+     CADENCE DATA MODULE
+     Every entry has license and source fields. Only traditional cadences
+     with no identified author or copyright claimant are bundled. Licensed
+     or premium packs can be added later with FormationCadences.registerPack()
+     (this build has no paywall; `tier` is just a label).
+     Lines: {c: call (leader), r: response (formation)}. Each half-line gets
+     4 steps, and every call starts on the LEFT foot.
+====================================================================== -->
+<script id="cadence-data">
+window.FormationCadences = (function(){
+  const TRAD = "Traditional U.S. military oral folklore. No known author or copyright claimant found.";
+  const packs = [{
+    id: "core-traditional", title: "Traditional (bundled)", tier: "free", license: TRAD,
+    cadences: [
+      { id:"basic-count", title:"Basic count: Left, left, left-right-left", tempo:"quick",
+        license:"Public domain. Standard drill count. U.S. Government drill terminology (TC 3-21.5).",
+        source:"Standard drill count used in TC 3-21.5 cadence practice",
+        lines:[{c:"Left… left… left, right, LEFT", r:"Left… left… left, right, LEFT"},
+               {c:"Your left… your left…", r:"Your left, right, LEFT"},
+               {c:"Left… right… left, right, LEFT", r:"Left… right… left, right, LEFT"}]},
+      { id:"here-we-go", title:"Here we go", tempo:"quick", license:TRAD, source:"Oral tradition (Army and Air Force basic training)",
+        lines:[{c:"Here we go", r:"Here we go"},{c:"All the way", r:"All the way"},{c:"Every day", r:"Every day"},
+               {c:"Like a soldier", r:"Like a soldier"},{c:"Proud and strong", r:"Proud and strong"},{c:"All day long", r:"All day long"}]},
+      { id:"c130", title:"C-130 rollin' down the strip", tempo:"quick", license:TRAD, source:"Oral tradition (U.S. Army Airborne)",
+        lines:[{c:"C-130 rollin' down the strip", r:"C-130 rollin' down the strip"},
+               {c:"Airborne daddy gonna take a little trip", r:"Airborne daddy gonna take a little trip"},
+               {c:"Stand up, hook up, shuffle to the door", r:"Stand up, hook up, shuffle to the door"},
+               {c:"Jump right out and count to four", r:"Jump right out and count to four"},
+               {c:"If my main don't open wide", r:"If my main don't open wide"},
+               {c:"I got a reserve by my side", r:"I got a reserve by my side"}]},
+      { id:"mama-mama", title:"Mama, Mama, can't you see", tempo:"quick", license:TRAD+" Clean verses only.", source:"Oral tradition (U.S. Army basic training)",
+        lines:[{c:"Mama, Mama, can't you see", r:"Mama, Mama, can't you see"},
+               {c:"What the Army's done to me", r:"What the Army's done to me"},
+               {c:"They took away my faded jeans", r:"They took away my faded jeans"},
+               {c:"Now I'm wearing Army greens", r:"Now I'm wearing Army greens"},
+               {c:"They put me in a barber's chair", r:"They put me in a barber's chair"},
+               {c:"Spun me around, I had no hair", r:"Spun me around, I had no hair"}]},
+      { id:"airborne-ranger", title:"I wanna be an Airborne Ranger", tempo:"double", license:TRAD+" Clean verses only.", source:"Oral tradition (U.S. Army)",
+        lines:[{c:"I wanna be an Airborne Ranger", r:"I wanna be an Airborne Ranger"},
+               {c:"Live a life of guts and danger", r:"Live a life of guts and danger"},
+               {c:"Airborne Ranger, life of danger", r:"Airborne Ranger, life of danger"},
+               {c:"Up at dawn and on the run", r:"Up at dawn and on the run"},
+               {c:"Mission first till the job is done", r:"Mission first till the job is done"}]},
+      { id:"granny", title:"When my granny was ninety-one", tempo:"double", license:TRAD, source:"Oral tradition (U.S. military PT runs)",
+        lines:[{c:"When my granny was ninety-one", r:"When my granny was ninety-one"},
+               {c:"She did PT just for fun", r:"She did PT just for fun"},
+               {c:"When my granny was ninety-two", r:"When my granny was ninety-two"},
+               {c:"She did PT better than you", r:"She did PT better than you"},
+               {c:"When my granny was ninety-three", r:"When my granny was ninety-three"},
+               {c:"She did PT better than me", r:"She did PT better than me"},
+               {c:"When my granny was ninety-four", r:"When my granny was ninety-four"},
+               {c:"She did PT more and more", r:"She did PT more and more"}]},
+      { id:"up-in-the-morning", title:"Up in the morning", tempo:"quick", license:TRAD, source:"Oral tradition (U.S. Army basic training)",
+        lines:[{c:"Up in the morning with the rising sun", r:"Up in the morning with the rising sun"},
+               {c:"Gonna march all day till the march is done", r:"Gonna march all day till the march is done"},
+               {c:"Left foot, right foot, keep it in line", r:"Left foot, right foot, keep it in line"},
+               {c:"Shoulders back and we're doing fine", r:"Shoulders back and we're doing fine"}]}
+    ]}];
+  /* Deliberately EXCLUDED:
+     - "Sound Off" (the Duckworth Chant) and Jody verses taken from it ("I had a good home but I left",
+       "Ain't no use in going home…"). Willie Lee Duckworth and Bernard Lentz copyrighted it
+       (Shapiro, Bernstein & Co., 1951; renewed 1979), and ASCAP collects royalties on it.
+     - Anything from a commercial cadence album, film, or book, and any cadence set to a pop song. */
+  return {
+    packs,
+    /** Hook for future (e.g. premium/licensed) packs: {id,title,tier,license,cadences:[...]} */
+    registerPack(pack){ if(!pack||!pack.id||!Array.isArray(pack.cadences)) throw new Error("bad pack"); packs.push(pack); document.dispatchEvent(new Event("cadencepacks")); },
+    all(){ return packs.flatMap(p=>p.cadences.map(c=>Object.assign({pack:p.id, tier:p.tier}, c))); }
+  };
+})();
+</script>
+<script id="main">
+"use strict";
+/* ---------- Small helpers ---------- */
+const $ = id => document.getElementById(id);
+const D2R = Math.PI/180;
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp = (a,b,t)=>a+(b-a)*t;
+const ease = t => t<.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2;
+// Heading h is in radians: 0 = north (screen up), positive = clockwise (to the right).
+const dirV = h => [Math.sin(h), -Math.cos(h)];
+const nrmV = h => [Math.cos(h), Math.sin(h)];          // right-hand normal
+let simNow = null;                                        // virtual clock for automated tests
+const now = () => simNow ?? performance.now();
+const params = new URLSearchParams(location.search);
+const DEBUG = params.has("debug");
+
+/* ======================================================================
+   PATH: the line of march, made of straight and arc segments. Each
+   rank's centre sits at an arc length `s` along it, so every rank turns
+   at the same pivot point, as in real drill. Arcs carry a speed factor:
+   the OUTSIDE file keeps a full 30-inch step while the pivot file takes
+   short (half) steps.
+====================================================================== */
+class Path {
+  constructor(){ this.segs = []; }
+  static straight(x,y,h){ const p=new Path(); p.segs.push({t:"L",x,y,h,s0:0,len:Infinity,f:1}); return p; }
+  static fromPoints(pts){ // polyline (used for reversed paths and counter-column file paths)
+    const p=new Path(); let s=0;
+    for(let i=0;i<pts.length-1;i++){
+      const a=pts[i], b=pts[i+1], dx=b[0]-a[0], dy=b[1]-a[1], len=Math.hypot(dx,dy);
+      if(len<1e-6) continue;
+      p.segs.push({t:"L",x:a[0],y:a[1],h:Math.atan2(dx,-dy),s0:s,len,f:1}); s+=len;
+    }
+    return p;
+  }
+  get last(){ return this.segs[this.segs.length-1]; }
+  segAt(s){
+    const g=this.segs; let lo=0, hi=g.length-1;
+    while(lo<hi){ const m=(lo+hi+1)>>1; if(g[m].s0<=s) lo=m; else hi=m-1; }
+    return g[lo];
+  }
+  posAt(s){
+    const g=this.segAt(s), u=s-g.s0;
+    if(g.t==="L" || u<0){ const d=dirV(g.h); return {x:g.x+d[0]*u, y:g.y+d[1]*u, h:g.h}; } // u<0: extrapolate behind start
+    if(u>g.len){ const e=this.arcPoint(g,g.len), d=dirV(e.h), v=u-g.len; return {x:e.x+d[0]*v,y:e.y+d[1]*v,h:e.h}; }
+    return this.arcPoint(g,u);
+  }
+  arcPoint(g,u){ const h=g.h+g.d*u/g.r, n=nrmV(h); return {x:g.cx-g.d*n[0]*g.r, y:g.cy-g.d*n[1]*g.r, h}; }
+  factorAt(s){ const g=this.segAt(s); return (s-g.s0<=g.len)? g.f : 1; }
+  /** Cut the open-ended last line at sCut, then append items
+      {t:"A", ang, r, d(+1 right/-1 left), f} or {t:"L", len}. Always ends with an infinite line. */
+  append(sCut, items){
+    const L=this.last;
+    if(L.len===Infinity){ if(sCut<L.s0) sCut=L.s0; L.len=sCut-L.s0; } else sCut=L.s0+L.len;
+    let cur=sCut, p=this.posAt(sCut);
+    for(const it of items){
+      if(it.t==="A"){
+        const n=nrmV(p.h), seg={t:"A",x:p.x,y:p.y,h:p.h,r:it.r,d:it.d,s0:cur,len:it.ang*it.r,f:it.f??1,
+          cx:p.x+it.d*n[0]*it.r, cy:p.y+it.d*n[1]*it.r};
+        this.segs.push(seg); cur+=seg.len; p=this.arcPoint(seg,seg.len);
+      } else {
+        const seg={t:"L",x:p.x,y:p.y,h:p.h,s0:cur,len:it.len,f:1};
+        this.segs.push(seg); if(it.len===Infinity) return;
+        cur+=it.len; const d=dirV(p.h); p={x:p.x+d[0]*it.len,y:p.y+d[1]*it.len,h:p.h};
+      }
+    }
+    this.segs.push({t:"L",x:p.x,y:p.y,h:p.h,s0:cur,len:Infinity,f:1});
+  }
+  translate(dx,dy){ for(const g of this.segs){ g.x+=dx; g.y+=dy; if(g.t==="A"){ g.cx+=dx; g.cy+=dy; } } }
+  prune(sMin){ while(this.segs.length>2 && this.segs[1].s0 < sMin) this.segs.shift(); } // keep memory bounded
+}
+
+/* ======================================================================
+   COMMAND TABLE: one source of truth for parsing, rules, and the
+   reference screen.
+   exec: class of the command-of-execution word.
+   foot: L | R | either | null (not marching)
+   when: "march" (marching only) | "halt" (at the halt only) | "any"
+====================================================================== */
+const UNIT = "(?:squad|squat|squads|platoon|plato|platoons|flight|flights|fight|company|detail|element|team|section|class|formation|unit|troop|troops)";
+const COL  = "(?:colum|column|columns|colin|collum|calm|call|colon|kolam|calum|culm|com)";
+const RIGHT= "(?:right|write|rite|ride|wright|ryte|rights|rice)";
+const LEFT = "(?:left|lift|lef|laughed|lefts)";
+const HALF = "(?:half|have|haf|hav|halves)";
+const STEP = "(?:step|steps|stop|stepped)";
+const CMDS = [
+  {id:"counter", name:"Counter column, MARCH", exec:"MARCH", re:"counter|encounter", foot:"either", when:"any",
+   desc:"The formation reverses inside its own frontage. 1st squad takes 3 steps and turns column right twice. 2nd squad takes 1 step and turns column right twice. 3rd squad turns column left twice. 4th squad takes 2 steps and turns column left twice. Squads that finish first half-step until all are abreast. Needs 4 files."},
+  {id:"colHR", name:"Column half right, MARCH", exec:"MARCH", re:HALF+"\\s*"+RIGHT, foot:"R", when:"any", desc:"One more step, then the front rank pivots 45° right. Every rank wheels at the same point."},
+  {id:"colHL", name:"Column half left, MARCH", exec:"MARCH", re:HALF+"\\s*"+LEFT, foot:"L", when:"any", desc:"One more step, then the front rank pivots 45° left. Every rank wheels at the same point."},
+  {id:"colR", name:"Column right, MARCH", exec:"MARCH", re:COL+"\\s*"+RIGHT, foot:"R", when:"any", desc:"One more step. The right file pivots 90° right and half-steps while the other files wheel until abreast, then everyone takes full steps. Every rank turns at the same pivot point."},
+  {id:"colL", name:"Column left, MARCH", exec:"MARCH", re:COL+"\\s*"+LEFT, foot:"L", when:"any", desc:"Mirror of Column right. The left file pivots and half-steps while the right files wheel up."},
+  {id:"rflank", name:"Right flank, MARCH", exec:"MARCH", re:RIGHT+"\\s*(?:flank|flake|flanks|frank|plank|thank)", foot:"R", when:"march", desc:"One more step. Everyone pivots 90° right on the ball of the left foot and steps off. Ranks become files."},
+  {id:"lflank", name:"Left flank, MARCH", exec:"MARCH", re:LEFT+"\\s*(?:flank|flake|flanks|frank|plank|thank)", foot:"L", when:"march", desc:"One more step. Everyone pivots 90° left and steps off. Ranks become files."},
+  {id:"rstep", name:"Right step, MARCH", exec:"MARCH", re:RIGHT+"\\s*"+STEP, foot:null, when:"halt", desc:"From the halt only. 15-inch steps to the right; the formation keeps its facing. Platoon, HALT stops it."},
+  {id:"lstep", name:"Left step, MARCH", exec:"MARCH", re:LEFT+"\\s*"+STEP, foot:null, when:"halt", desc:"From the halt only. 15-inch steps to the left."},
+  {id:"back", name:"Backward, MARCH", exec:"MARCH", re:"back\\s*wards?|backward|backwords|back word", foot:null, when:"halt", desc:"From the halt only. 15-inch steps to the rear; facing doesn't change."},
+  {id:"rear", name:"Rear, MARCH", exec:"MARCH", re:"(?:^|\\s)(?:rear|rare|rhea|reer|wear|year|ear|rehr|real|rears)$", foot:"R", when:"march", desc:"Called as the right foot strikes. One more step with the left, pivot 180° right on the balls of both feet, step off with the left. The rear rank becomes the front rank."},
+  {id:"mark", name:"Mark time, MARCH", exec:"MARCH", re:"(?:mark|marc|marked|market|mart)\\s*(?:time|tim|tom|times)", foot:"either", when:"any", desc:"One more step, then march in place. The cadence continues. Forward, MARCH resumes."},
+  {id:"halfstep", name:"Half step, MARCH", exec:"MARCH", re:HALF+"\\s*"+STEP, foot:"either", when:"march", desc:"Shorten to 15-inch steps at the same cadence. Forward, MARCH resumes 30-inch steps."},
+  {id:"change", name:"Change step, MARCH", exec:"MARCH", re:"(?:change|chain|changed|chang)\\s*"+STEP, foot:"R", when:"march", desc:"Called as the right foot strikes. One more step with the left, ball of the right foot next to the left heel, then step off with the left (a hitch step)."},
+  {id:"double", name:"Double time, MARCH", exec:"MARCH", re:"(?:double|dubble|doubled)\\s*(?:time|tim|times)", foot:"either", when:"any", desc:"One more 30-inch step, then double time: 180 steps per minute, 36-inch steps."},
+  {id:"quick", name:"Quick time, MARCH", exec:"MARCH", re:"(?:quick|quik|kwik)\\s*(?:time|tim|times)", foot:"either", when:"march", desc:"Back to quick time (normal cadence, 30-inch steps)."},
+  {id:"openranks", name:"Open ranks, MARCH", exec:"MARCH", re:"open\\s*(?:ranks?|rings|rank's)", foot:null, when:"halt", desc:"At the halt. Ranks open to double distance. The 3rd rank stands fast; ranks ahead step forward and ranks behind step back."},
+  {id:"closeranks", name:"Close ranks, MARCH", exec:"MARCH", re:"close\\s*(?:ranks?|rings|rank's)", foot:null, when:"halt", desc:"At the halt. Ranks close back to normal distance."},
+  {id:"extend", name:"Extend, MARCH", exec:"MARCH", re:"extend|extent|extended", foot:"either", when:"any", desc:"Files extend from close interval back to normal interval."},
+  {id:"close", name:"Close, MARCH", exec:"MARCH", re:"(?:^|\\s)(?:close|clothes|closed|clove)$", foot:"either", when:"any", desc:"Files close to close interval (4 inches between soldiers)."},
+  {id:"forward", name:"Forward, MARCH", exec:"MARCH", re:"forward|for word|foreword|forwards|four word", foot:"either", when:"any", desc:"From the halt: step off with the left foot. From mark time or half step: resume 30-inch steps."},
+  {id:"halt", name:"Platoon / Squad / Flight, HALT", exec:"HALT", re:UNIT, foot:"either", when:"march", desc:"Two counts: one more step, then bring the trailing foot alongside."},
+  {id:"attn", name:"Platoon, ATTENTION", exec:"ATTN", re:UNIT, foot:null, when:"halt", desc:"Snap to attention from any rest. Required before moving on Standard and Drill Sergeant."},
+  {id:"rface", name:"Right, FACE", exec:"FACE", re:"(?:^|\\s)"+RIGHT+"$", foot:null, when:"halt", desc:"Pivot 90° right on the right heel and left ball, then bring the left foot alongside. Ranks become files."},
+  {id:"lface", name:"Left, FACE", exec:"FACE", re:"(?:^|\\s)"+LEFT+"$", foot:null, when:"halt", desc:"Pivot 90° left. Ranks become files."},
+  {id:"aface", name:"About, FACE", exec:"FACE", re:"about|a bout|bout|abouts", foot:null, when:"halt", desc:"Right toe half a foot length behind the left heel, then pivot 180° to the right. The formation faces the rear."},
+  {id:"parade", name:"Parade, REST", exec:"REST", re:"parade|prade|per aid|parades|para", foot:null, when:"halt", desc:"Left foot 10 inches to the left, hands at the small of the back."},
+  {id:"standease", name:"Stand at, EASE", exec:"EASE", re:"stand", foot:null, when:"halt", desc:"Like parade rest, but head and eyes on the commander."},
+  {id:"atease", name:"AT EASE", exec:"ATEASE", re:"", single:true, foot:null, when:"halt", desc:"One-part command, so there's no prep and no inflection check. The right foot stays in place."},
+  {id:"dress", name:"Dress right, DRESS", exec:"DRESS", re:RIGHT, foot:null, when:"halt", desc:"Heads and eyes right, left arms extended. Soldiers align on the right file."},
+  {id:"eyes", name:"Eyes, RIGHT", exec:"RIGHT", re:"(?:^|\\s)(?:eyes|eye|ice|i's|ayes|i)$", foot:"R", when:"any", desc:"Heads and eyes 45° right. While marching, the right file keeps looking to the front. Called as the right foot strikes."},
+  {id:"front", name:"Ready, FRONT", exec:"FRONT", re:"ready|reddy|readi", foot:"L", when:"any", desc:"Ends Dress right or Eyes right. Called as the left foot strikes when marching."},
+  {id:"fallin", name:"Fall, IN", exec:"IN", re:"fall", foot:null, when:"any", desc:"Forms the platoon in column at attention. Resets position, and restarts after Formation Broke."},
+];
+const CMD = Object.fromEntries(CMDS.map(c=>[c.id,c]));
+
+/* Execution-word recogniser: token -> class (tolerant of mis-hearings) */
+const EXEC_WORDS = {
+  MARCH:["march","marsh","marge","much","mars","harch","hutch","hut","ho","hoe","hah","huh","arch","mash","match","marched","marching","martch","mosh","hoch","harsh","mach"],
+  HALT:["halt","hold","holt","hall","haul","alt","hault","hult","hoult","halts","holds"],
+  FACE:["face","faith","phase","fase","fays","faced","faces","fate"],
+  REST:["rest","wrest","rust","ress","rests","rested","wrist"],
+  EASE:["ease","ees","easy","eese"],
+  DRESS:["dress","dres","drez","dressed","dresses","jess"],
+  FRONT:["front","frunt","fronts","fron"],
+  RIGHT:["right","rite","write","wright","ride"],
+  ATTN:["attention","tension","tenshun","attenshun"],
+};
+const EXEC_LOOKUP = {};
+for(const [k,arr] of Object.entries(EXEC_WORDS)) for(const w of arr) (EXEC_LOOKUP[w]=EXEC_LOOKUP[w]||[]).push(k);
+
+/** Parse a transcript into {cmd, prep} or null, using the LAST execution word heard. */
+function parseCommand(text){
+  const t = text.toLowerCase().replace(/[^a-z0-9' ]+/g," ").replace(/\b10\b/g,"ten").replace(/\s+/g," ").trim();
+  const tok = t.split(" ").filter(Boolean);
+  if(!tok.length) return null;
+  const tail = tok.slice(-3).join(" ");
+  // one-part and special forms
+  if(/(?:^|\s)at ease$/.test(tail) && !/stand (?:at|and) ease$/.test(tail)) return {cmd:CMD.atease, prep:""};
+  if(/(?:^|\s)(?:ten hut|tenhut|ten hot|atten hut|attenhut)$/.test(tail)) return {cmd:CMD.attn, prep:tok.slice(-6,-2).join(" ")};
+  if(/(?:^|\s)(?:fall in|fallin|falling|fallen|fall inn)$/.test(tail)) return {cmd:CMD.fallin, prep:"fall"};
+  for(let i=tok.length-1;i>=Math.max(0,tok.length-2);i--){   // allow one trailing noise word
+    const classes = EXEC_LOOKUP[tok[i]]; if(!classes) continue;
+    const prep = tok.slice(Math.max(0,i-5), i).join(" ");
+    for(const cls of classes){
+      for(const c of CMDS){
+        if(c.exec!==cls || c.single) continue;
+        if(c.id==="halt"||c.id==="attn"){ // unit word optional on Easy
+          if(new RegExp(UNIT).test(prep) || (settings.sens==="easy" && prep.length===0)) return {cmd:c, prep};
+          continue;
+        }
+        if(c.re && new RegExp(c.re).test(prep)) return {cmd:c, prep};
+      }
+    }
+  }
+  return null;
+}
+
+/* ======================================================================
+   SETTINGS & PERSISTENCE
+====================================================================== */
+const settings = { sens:"standard", unit:"Platoon", tick:true };
+const SENS = { // inflection thresholds per sensitivity
+  easy:     {minPeak:-52, loud:1, spike:4,  pitch:1.5, maxDur:1100, attack:400, prepRise:-99, gap:0,  foot:"ignore", needAttn:false},
+  standard: {minPeak:-45, loud:3, spike:7,  pitch:2.5, maxDur:750,  attack:220, prepRise:-99, gap:40, foot:"warn",   needAttn:true},
+  ds:       {minPeak:-38, loud:6, spike:10, pitch:3.5, maxDur:520,  attack:130, prepRise:0.5, gap:80, foot:"reject", needAttn:true},
+};
+let hiScore = +localStorage.getItem("formation.hi") || 0;
+
+/* ======================================================================
+   AUDIO: step ticks + mic analysis (pitch and loudness)
+====================================================================== */
+let actx=null, analyser=null, micStream=null, micOK=false, audioBuf=null;
+const frames=[];             // ring of {t, db, hz}, ~25 ms apart, last 8 s
+let noiseFloor=-60, lastLoudT=0;
+function ensureAudio(){
+  if(!actx){ const AC=window.AudioContext||window.webkitAudioContext; if(AC) actx=new AC(); }
+  if(actx && actx.state==="suspended") actx.resume();
+}
+function tick(foot){
+  if(!actx||!settings.tick) return;
+  const t=actx.currentTime, o=actx.createOscillator(), g=actx.createGain();
+  o.type="triangle"; o.frequency.setValueAtTime(foot==="L"?140:190,t); o.frequency.exponentialRampToValueAtTime(60,t+.08);
+  g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(foot==="L"?.35:.2,t+.005); g.gain.exponentialRampToValueAtTime(.0001,t+.1);
+  o.connect(g).connect(actx.destination); o.start(t); o.stop(t+.12);
+}
+function chime(ok){
+  if(!actx) return; const t=actx.currentTime, o=actx.createOscillator(), g=actx.createGain();
+  o.type="sine"; o.frequency.setValueAtTime(ok?880:220,t); if(ok) o.frequency.setValueAtTime(1320,t+.07);
+  g.gain.setValueAtTime(.1,t); g.gain.exponentialRampToValueAtTime(.0001,t+.18); o.connect(g).connect(actx.destination); o.start(t); o.stop(t+.2);
+}
+async function startMic(){
+  try{
+    // Auto gain control is OFF on purpose: it would flatten the loudness jump we measure.
+    micStream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:false, autoGainControl:false}});
+    const src=actx.createMediaStreamSource(micStream);
+    analyser=actx.createAnalyser(); analyser.fftSize=2048; analyser.smoothingTimeConstant=0;
+    src.connect(analyser); audioBuf=new Float32Array(analyser.fftSize); micOK=true;
+    setInterval(analyseFrame, 25);
+    return true;
+  }catch(e){
+    micOK=false; const n=$("noMic");
+    n.textContent="Microphone unavailable ("+e.name+"), so inflection can't be measured. Allow mic access and open the page over HTTPS."; n.classList.add("on");
+    return false;
+  }
+}
+/** One analysis frame: RMS level (dBFS) and autocorrelation pitch (Hz) */
+function analyseFrame(){
+  analyser.getFloatTimeDomainData(audioBuf);
+  let sum=0; for(let i=0;i<audioBuf.length;i++) sum+=audioBuf[i]*audioBuf[i];
+  const rms=Math.sqrt(sum/audioBuf.length), db=20*Math.log10(rms+1e-9);
+  const t=now()-(analyser.fftSize/actx.sampleRate)*500; // centre of the analysis window
+  const hz = db>noiseFloor+8 ? detectPitch(audioBuf, actx.sampleRate) : 0;
+  frames.push({t,db,hz}); while(frames.length && frames[0].t<t-8000) frames.shift();
+  // adaptive noise floor: falls fast, rises slowly
+  noiseFloor = db<noiseFloor ? lerp(noiseFloor,db,.3) : lerp(noiseFloor,db,.004);
+  noiseFloor = clamp(noiseFloor,-90,-35);
+  if(db>voiceThresh()) lastLoudT=t;
+}
+const voiceThresh = ()=> Math.max(noiseFloor+10, -58);
+/** Normalised autocorrelation on a 2x-decimated buffer, 70–450 Hz. Returns 0 if unvoiced. */
+function detectPitch(buf, sr){
+  const N=buf.length>>1, x=new Float32Array(N);
+  for(let i=0;i<N;i++) x[i]=(buf[2*i]+buf[2*i+1])*.5;
+  const fs=sr/2, minLag=Math.floor(fs/450), maxLag=Math.min(Math.floor(fs/70), N>>1), M=N-maxLag;
+  let e0=0; for(let i=0;i<M;i++) e0+=x[i]*x[i];
+  let best=0, bestLag=0, prev=1, rising=false; const r=[];
+  for(let lag=minLag;lag<=maxLag;lag++){
+    let c=0, e1=0; for(let i=0;i<M;i++){ c+=x[i]*x[i+lag]; e1+=x[i+lag]*x[i+lag]; }
+    const v=c/Math.sqrt(e0*e1+1e-12); r[lag]=v;
+    if(v>prev) rising=true;                  // skip the zero-lag lobe
+    if(rising && v>best){ best=v; bestLag=lag; }
+    prev=v;
+  }
+  if(best<0.55||!bestLag) return 0;
+  const a=r[bestLag-1]??best, b=best, c=r[bestLag+1]??best, den=(a-2*b+c)||1, p=(a-c)/(2*den);
+  return fs/(bestLag+clamp(p,-.5,.5));      // parabolic interpolation
+}
+const semis = (a,b)=> 12*Math.log2(a/b);
+const median = arr => { if(!arr.length) return 0; const s=[...arr].sort((a,b)=>a-b); return s[s.length>>1]; };
+
+/** Split recent audio into voiced segments: [{t0,t1,peak,peakT,fr}] */
+function segmentsBetween(tA,tB){
+  const th=voiceThresh(), segs=[]; let cur=null, quiet=0;
+  for(const f of frames){
+    if(f.t<tA||f.t>tB) continue;
+    if(f.db>th){ if(!cur) cur={t0:f.t,t1:f.t,peak:f.db,peakT:f.t,fr:[]}; cur.t1=f.t; cur.fr.push(f); if(f.db>cur.peak){cur.peak=f.db;cur.peakT=f.t;} quiet=0; }
+    else if(cur){ quiet+=25; if(quiet>90){ segs.push(cur); cur=null; quiet=0; } }
+  }
+  if(cur) segs.push(cur);
+  return segs.filter(s=>s.t1-s.t0>=50);
+}
+
+/** Inflection check. Command of execution = the last voiced segment; prep = the segments before it.
+    Requires a louder execution (peak above the prep's average), a short abrupt delivery, and an
+    inflection: a pitch change of N semitones OR a sharp energy spike. */
+function analyseInflection(cmd, heardAt){
+  const S=SENS[settings.sens];
+  if(!micOK) return {ok:true, warn:"Inflection not measured (no mic level)"};
+  const from=Math.max(heardAt-5000, ttsQuietSince);
+  const segs=segmentsBetween(from, now());
+  if(!segs.length){
+    // Some Android builds silence getUserMedia while speech recognition runs.
+    if(!frames.some(f=>f.t>from && f.db>-85)) return {ok:true, warn:"Mic level blocked during recognition (device limit). Inflection not measured."};
+    return {ok:false, reason:"Too soft", detail:"Couldn't pick out your voice over the background noise"};
+  }
+  const ex=segs[segs.length-1];
+  const prepSegs=segs.slice(0,-1).filter(s=>s.t0>ex.t0-3800);
+  if(!prepSegs.length) return {ok:false, reason:"No preparatory command", detail:"Give the prep, pause, then the command of execution", ex, prepSegs};
+  const prepFr=prepSegs.flatMap(s=>s.fr);
+  const prepMean=10*Math.log10(prepFr.reduce((a,f)=>a+Math.pow(10,f.db/10),0)/prepFr.length);
+  const loud=ex.peak-prepMean, dur=ex.t1-ex.t0, attack=ex.peakT-ex.t0, gap=ex.t0-prepSegs[prepSegs.length-1].t1;
+  const pP=prepFr.filter(f=>f.hz).map(f=>f.hz), eP=ex.fr.filter(f=>f.hz).map(f=>f.hz);
+  const third=Math.max(1,Math.floor(pP.length/3));
+  const prepStart=median(pP.slice(0,third)), prepEnd=median(pP.slice(-third)), execHz=median(eP);
+  const pitchDelta = (prepEnd&&execHz)? semis(execHz,prepEnd) : 0;
+  const prepRise = (prepStart&&prepEnd)? semis(prepEnd,prepStart) : 0;
+  const fmt=`Exec ${loud>=0?"+":""}${loud.toFixed(1)} dB · pitch ${pitchDelta>=0?"+":""}${pitchDelta.toFixed(1)} st · ${Math.round(dur)} ms`;
+  const res=(ok,reason,detail)=>({ok,reason,detail:detail?detail+" · "+fmt:fmt,ex,prepSegs,m:{loud,dur,attack,pitchDelta,prepRise,gap}});
+  if(ex.peak<S.minPeak || loud<S.loud) return res(false,"Too soft","The execution must be louder than the prep");
+  if(gap<S.gap) return res(false,"No pause","Pause between the prep and the execution");
+  if(dur>S.maxDur || attack>S.attack) return res(false,"Drawn out","Snap the execution word: short and sharp");
+  if(!(Math.abs(pitchDelta)>=S.pitch || loud>=S.spike)) return res(false,"No inflection","Raise the prep, then a distinct drop or a sharp punch on the execution");
+  if(prepRise<S.prepRise && loud<S.spike+3) return res(false,"Flat prep","Raise your pitch through the preparatory command");
+  return res(true,"ACCEPTED");
+}
+
+/* ======================================================================
+   BEAT CLOCK: beat k is the moment foot(k) strikes the ground. Even = LEFT.
+   clock.k is the index of the NEXT beat to fire; curBeat is the one firing.
+====================================================================== */
+const clock = { k:0, nextT:0, period:625, lastT:0 };
+let curBeat = 0;
+const footOf = k => (((k%2)+2)%2===0) ? "L" : "R";
+function footAtTime(t){ const k=clock.k-1+Math.round((t-clock.lastT)/clock.period); return {k, foot:footOf(k)}; }
+
+/* ======================================================================
+   GAME STATE
+====================================================================== */
+const SNAKE_W=14, SNAKE_H=21;   // parade field in steps (1 unit = one 30-inch step)
+let G=null;      // current game
+let F=null;      // formation: {W, rankDist, interval, path, ranks:[{s, sol:[soldier|null per file]}], mode, cc}
+let soldierId=0;
+function newSoldier(){ return {id:soldierId++, x:0,y:0,face:0, px:null,py:null, spd:0, trans:null, faceAnim:null}; }
+
+/** Column formation: W files, `count` soldiers, front-rank centre (x,y), heading h.
+    File index sq: 0 = 1st squad = LEFT file in column (as formed by Right, FACE from line). */
+function makeFormation(x,y,h,W,count){
+  const back=dirV(h), path=Path.straight(x-back[0]*300, y-back[1]*300, h);
+  const f={W, rankDist:1, interval:1, path, ranks:[], mode:"column", cc:null};
+  const D=Math.ceil(count/W); let n=0;
+  for(let r=0;r<D;r++){ const sol=new Array(W).fill(null); for(let sq=W-1;sq>=0 && n<count;sq--,n++) sol[sq]=newSoldier(); f.ranks.push({s:300-r, sol}); }
+  return f;
+}
+function allSoldiers(){ const out=[]; for(const rk of F.ranks) for(const s of rk.sol) if(s) out.push(s); return out; }
+
+function newGame(mode){
+  G = { mode, score:0, recruits:[], over:false, move:"halt", tempo:"quick", posture:"attention",
+        dress:false, eyes:false, sched:[], hitch:false, busy:null, prevMove:"forward", bpmBase: mode==="snake"?96:120 };
+  soldierId=0;
+  if(mode==="snake"){ F=makeFormation(SNAKE_W/2, SNAKE_H-4, 0, 4, 8); }
+  else F=makeFormation(0,0,0,4, mode==="drill"?16:4);
+  layoutSoldiers(0,true);
+  if(mode==="snake") spawnRecruit();
+  cam.x=0; cam.y=0;
+  $("overlay").classList.remove("on");
+  updateHUD(); setStateTag();
+}
+function bpm(){
+  if(G.tempo==="double") return 180;
+  return G.mode==="snake" ? Math.min(132, G.bpmBase+2*G.score/10) : G.bpmBase;
+}
+
+/* ---------- Scheduling: run fn at beat index k ---------- */
+function at(k, fn){ G.sched.push({k,fn}); }
+/** Next beat index (>= the next beat to fire) whose foot matches, or the very next beat. */
+function nextBeat(foot){ let k=clock.k; if(foot==="L"||foot==="R"){ while(footOf(k)!==foot) k++; } return k; }
+
+/* ======================================================================
+   COMMAND EXECUTION: footwork per TC 3-21.5, simplified to whole counts.
+   execute() runs ON beat curBeat; curBeat+1 is "one more step".
+====================================================================== */
+const marching = () => ["forward","mark","half","rstep","lstep","back","pivot","closing"].includes(G.move) || (F && F.mode==="counter");
+
+/** Return why the command can't be executed now, or null. */
+function canExecute(c){
+  if(G.over && c.id!=="fallin") return "Formation broke. Say Fall, IN";
+  if(G.busy && c.id!=="fallin") return "Wait: "+G.busy+" in progress";
+  const halted = G.move==="halt";
+  if(c.when==="halt" && !halted) return "Must be at the halt";
+  if(c.when==="march" && halted) return c.id.includes("flank")? "At the halt, use Right/Left, FACE" : c.id==="rear"? "At the halt, use About, FACE" : "Must be marching";
+  if(["rstep","lstep","back"].includes(G.move) && !["halt","fallin"].includes(c.id)) return "Halt the formation first";
+  const S=SENS[settings.sens];
+  const needsAttn = ["forward","colR","colL","colHR","colHL","counter","mark","double","rstep","lstep","back","rface","lface","aface","dress","openranks","closeranks","extend","close","eyes"];
+  if(halted && G.posture!=="attention" && needsAttn.includes(c.id)){
+    if(S.needAttn) return "Call "+settings.unit+", ATTENTION first";
+    G.posture="attention";
+  }
+  if(c.id==="counter" && F.W!==4) return "Counter column needs 4 files (column formation)";
+  if(c.id==="quick" && G.tempo==="quick") return "Already at quick time";
+  if(c.id==="extend" && F.interval===1) return "Already at normal interval";
+  return null;
+}
+
+function execute(c){
+  const k=curBeat, halted=G.move==="halt", stride=strideNow();
+  switch(c.id){
+    case "forward":
+      if(halted){ realignForStepOff(); G.move="forward"; }
+      else at(k+1,()=>{ G.move="forward"; });
+      break;
+    case "halt":
+      at(k+1,()=>{ G.move="closing"; });                 // one more step…
+      at(k+2,()=>{ G.move="halt"; G.tempo="quick"; });    // …then the trailing foot comes alongside
+      break;
+    case "mark": if(halted){ realignForStepOff(); G.move="mark"; } else at(k+1,()=>{ G.move="mark"; }); break;
+    case "halfstep": at(k+1,()=>{ G.move="half"; }); break;
+    case "double":
+      if(halted){ realignForStepOff(); G.move="forward"; G.tempo="double"; }
+      else at(k+1,()=>{ G.tempo="double"; if(G.move==="half") G.move="forward"; });
+      break;
+    case "quick": at(k+1,()=>{ G.tempo="quick"; }); break;
+    case "change": G.busy="change step"; at(k+1,()=>{ G.hitch=true; }); at(k+2,()=>{ G.hitch=false; G.busy=null; }); break;
+    case "colR": case "colL": case "colHR": case "colHL": {
+      const d = (c.id==="colR"||c.id==="colHR")? 1 : -1, ang=(c.id.startsWith("colH")?45:90)*D2R;
+      const half=(F.W-1)/2*F.interval, inner=0.25, R=half+inner, Rout=R+half;
+      const arc={t:"A",ang,r:R,d,f:R/Rout};   // f: outside file keeps a full step, pivot file half-steps
+      if(halted||G.move==="mark"){ realignForStepOff(); G.move="forward"; F.path.append(F.ranks[0].s, [arc]); }
+      else { if(G.move==="half") G.move="forward"; F.path.append(F.ranks[0].s+stride, [arc]); } // one more step, then pivot
+      break; }
+    case "rflank": case "lflank":
+      G.busy="flank";
+      at(k+1,()=>{ flankTransform(c.id==="rflank"?1:-1); G.busy=null; });
+      break;
+    case "rear":
+      G.busy="rear march";
+      at(k+1,()=>{ G.prevMove = G.move==="half"?"half":"forward"; G.move="pivot"; rearTransform(); }); // pivot on the balls of both feet
+      at(k+2,()=>{ G.move=G.prevMove; G.busy=null; });                                             // step off with the left foot
+      break;
+    case "counter": if(halted){ realignForStepOff(); G.move="forward"; } else if(G.move!=="forward") G.move="forward"; startCounterColumn(); break;
+    case "rstep": case "lstep": case "back": realignForStepOff(); G.move=c.id; break;
+    case "rface": case "lface": flankTransform(c.id==="rface"?1:-1); break;
+    case "aface": rearTransform(); break;
+    case "parade": G.posture="parade"; G.dress=false; break;
+    case "standease": G.posture="standease"; G.dress=false; break;
+    case "atease": G.posture="atease"; G.dress=false; break;
+    case "attn": G.posture="attention"; break;
+    case "dress": G.dress=true; break;
+    case "eyes": G.eyes=true; break;
+    case "front": G.dress=false; G.eyes=false; break;
+    case "openranks": animateSpacing("rankDist", 2); break;
+    case "closeranks": animateSpacing("rankDist", 1); break;
+    case "extend": animateSpacing("interval", 1); break;
+    case "close": animateSpacing("interval", 0.6); break;
+    case "fallin": fallIn(); break;
+  }
+  setStateTag();
+}
+/** Re-index the beat so the first swing is the LEFT foot (step off with the left). */
+function realignForStepOff(){ if(footOf(clock.k)!=="L") clock.k++; }
+
+/** Distance (in 30-inch units) the formation covers per beat right now. */
+function strideNow(){
+  const base = G.tempo==="double" ? 1.2 : 1.0;  // 36-inch vs 30-inch step
+  switch(G.move){
+    case "forward": return G.hitch? base*0.5 : base;
+    case "half": case "back": case "rstep": case "lstep": return 0.5;
+    default: return 0;  // halt, mark time, pivot, closing
+  }
+}
+
+/* ---------- Spacing changes (open/close ranks, extend/close interval) ---------- */
+function animateSpacing(key, val){
+  const old=allSoldiers().map(s=>[s,s.x,s.y]);
+  if(key==="rankDist"){
+    const anchor=Math.min(2,F.ranks.length-1), sA=F.ranks[anchor].s;   // 3rd rank stands fast
+    F.ranks.forEach((rk,r)=>{ rk.s = sA - (r-anchor)*val; });
+  }
+  F[key]=val;
+  for(const [s,x,y] of old) s.trans={x,y,t0:now(),dur:clock.period*2};
+}
+
+/* ---------- Flank / facing: everyone turns 90° in place; ranks become files ---------- */
+function flankTransform(d){
+  const W=F.W, D=F.ranks.length;
+  const p0=F.path.posAt(F.ranks[0].s), h=p0.h, dv=dirV(h), nv=nrmV(h);
+  const ideal=(r,sq)=>({x:p0.x-dv[0]*r*F.rankDist+nv[0]*(sq-(W-1)/2)*F.interval, y:p0.y-dv[1]*r*F.rankDist+nv[1]*(sq-(W-1)/2)*F.interval});
+  const W2=D, D2=W, h2=h+d*90*D2R;
+  const ranks2=[]; for(let r=0;r<D2;r++) ranks2.push({s:0,sol:new Array(W2).fill(null)});
+  for(let r=0;r<D;r++) for(let sq=0;sq<W;sq++){
+    const s=F.ranks[r].sol[sq]; if(!s) continue;
+    const r2 = d>0 ? (W-1-sq) : sq, sq2 = d>0 ? r : (D-1-r);
+    ranks2[r2].sol[sq2]=s;
+    s.trans={x:s.x,y:s.y,t0:now(),dur:clock.period}; s.faceAnim={off:-d*90*D2R,t0:now(),dur:clock.period*.8};
+  }
+  let cx=0, cy=0;  // centre of the new front rank (= old right or left file)
+  for(let sq2=0;sq2<W2;sq2++){ const r=d>0?sq2:(D-1-sq2), sq=d>0?W-1:0, q=ideal(r,sq); cx+=q.x; cy+=q.y; }
+  cx/=W2; cy/=W2;
+  const b=dirV(h2); F.path=Path.straight(cx-b[0]*300, cy-b[1]*300, h2);
+  const rd=F.interval, iv=F.rankDist; F.rankDist=rd; F.interval=iv;
+  ranks2.forEach((rk,r)=>rk.s=300-r*F.rankDist);
+  F.W=W2; F.ranks=ranks2.filter(rk=>rk.sol.some(Boolean));
+}
+
+/* ---------- Rear march / about face: the rear rank becomes the front rank ---------- */
+function rearTransform(){
+  const sHead=F.ranks[0].s, sTail=F.ranks[F.ranks.length-1].s;
+  const ph=F.path.posAt(sHead), dh=dirV(ph.h);
+  const pts=[[ph.x+dh[0], ph.y+dh[1]]];      // 1 unit beyond the old head (behind the new tail)
+  for(let s=sHead; s>sTail+0.05; s-=0.1){ const p=F.path.posAt(s); pts.push([p.x,p.y]); }
+  const pt=F.path.posAt(sTail); pts.push([pt.x,pt.y]);
+  const np=Path.fromPoints(pts); const L=np.last; np.append(L.s0+L.len, [{t:"L",len:Infinity}]);
+  const old=F.ranks;
+  F.ranks=old.slice().reverse().map(rk=>({s:1+sHead-rk.s, sol:rk.sol.slice().reverse()}));
+  F.path=np;
+  for(const s of allSoldiers()) s.faceAnim={off:-Math.PI,t0:now(),dur:clock.period*.9};
+}
+
+/* ---------- Counter column (4 files), per TC 3-21.5 ---------- */
+function startCounterColumn(){
+  G.busy="counter column";
+  const W=4, iv=F.interval, D=F.ranks.length, sHead=F.ranks[0].s, sTail=F.ranks[D-1].s;
+  // sq 0..3 = 1st..4th squad (1st squad = left file). Final lanes interleave the old ones so files pass cleanly.
+  const pre=[3,1,0,2], dir=[1,1,-1,-1], lanesTo=[2.0,1.0,0.0,-1.0];
+  const paths=[], headS=[], endS=[];
+  for(let sq=0;sq<W;sq++){
+    const lat=(sq-(W-1)/2)*iv, pts=[];
+    for(let s=sTail-1; s<sHead; s+=0.2){ const p=F.path.posAt(s), n=nrmV(p.h); pts.push([p.x+n[0]*lat, p.y+n[1]*lat]); }
+    const p=F.path.posAt(sHead), n=nrmV(p.h); pts.push([p.x+n[0]*lat, p.y+n[1]*lat]);
+    const fp=Path.fromPoints(pts), L=fp.last, hs=L.s0+L.len;
+    const w=Math.abs(lanesTo[sq]*iv - lat), rr=Math.min(0.5*iv, w/2);
+    fp.append(hs, [{t:"L",len:pre[sq]}, {t:"A",ang:Math.PI/2,r:rr,d:dir[sq]}, {t:"L",len:Math.max(0,w-2*rr)}, {t:"A",ang:Math.PI/2,r:rr,d:dir[sq]}]);
+    const lastFinite=fp.segs[fp.segs.length-2];
+    paths.push(fp); headS.push(hs); endS.push(lastFinite.s0+lastFinite.len);
+  }
+  const depths=F.ranks.map(rk=>sHead-rk.s);
+  F.cc={paths, headS, endS, depths};
+  F.mode="counter";
+}
+function advanceCounter(dist){
+  const cc=F.cc, done=cc.headS.map((h,sq)=>h-cc.endS[sq]), minD=Math.min(...done);
+  for(let sq=0;sq<4;sq++){
+    // squads that have completed both turns take half steps until the others are abreast
+    const k = (done[sq]>=0 && done[sq]>minD+0.04) ? 0.5 : 1;
+    cc.headS[sq]+=dist*k;
+  }
+  const maxDepth=cc.depths[cc.depths.length-1];
+  const allPast=cc.headS.every((h,sq)=>h-maxDepth>=cc.endS[sq]-1e-6);
+  if(allPast && Math.max(...done)-minD<0.06) finishCounterColumn();
+}
+function finishCounterColumn(){
+  const cc=F.cc; let cx=0, cy=0, h=0;
+  for(let sq=0;sq<4;sq++){ const p=cc.paths[sq].posAt(cc.headS[sq]); cx+=p.x/4; cy+=p.y/4; h=p.h; }
+  const b=dirV(h); F.path=Path.straight(cx-b[0]*300, cy-b[1]*300, h);
+  F.ranks.forEach((rk,r)=>rk.s=300-cc.depths[r]);
+  for(const s of allSoldiers()) s.trans={x:s.x,y:s.y,t0:now(),dur:clock.period*.6};
+  F.mode="column"; F.cc=null; G.busy=null; setStateTag();
+}
+
+function fallIn(){ newGame(G.mode); flash("FALL IN","ok","Formed in column at attention"); }
+
+/* ======================================================================
+   MOVEMENT UPDATE (called every frame with elapsed time in beats)
+====================================================================== */
+function advance(dtBeats){
+  if(G.over) return;
+  const dist=strideNow()*dtBeats;
+  if(F.mode==="counter"){ advanceCounter(dist); return; }
+  if(G.move==="rstep"||G.move==="lstep"||G.move==="back"){
+    const h=F.path.posAt(F.ranks[0].s).h;
+    const v = G.move==="back"? dirV(h).map(x=>-x) : nrmV(h).map(x=>G.move==="rstep"?x:-x);
+    F.path.translate(v[0]*dist, v[1]*dist); return;
+  }
+  if(dist<=0) return;
+  // Front rank: speed factor < 1 on arcs, so the pivot file half-steps while the outside file wheels.
+  const r0=F.ranks[0]; r0.s += dist*F.path.factorAt(r0.s);
+  for(let r=1;r<F.ranks.length;r++){
+    const rk=F.ranks[r], prev=F.ranks[r-1], f=F.path.factorAt(rk.s), gap=prev.s-rk.s;
+    let ds=dist*f;
+    if(f===1 && gap>F.rankDist+0.01) ds=Math.min(ds*1.15, gap-F.rankDist+ds);   // cover down after a turn
+    let target=Math.min(rk.s+ds, prev.s-0.35*F.rankDist);
+    // Keep >= 80% distance to the soldier ahead: shorten to a half step, or mark time, if needed.
+    if(!rankClear(r,target)){ const half=rk.s+ds*.5; target = rankClear(r,half)? half : rk.s; }
+    rk.s=Math.max(rk.s,target);
+  }
+  F.path.prune(F.ranks[F.ranks.length-1].s-20);
+}
+function slotPos(sq,s){
+  const p=F.path.posAt(s), n=nrmV(p.h), lat=(sq-(F.W-1)/2)*F.interval;
+  return {x:p.x+n[0]*lat, y:p.y+n[1]*lat, h:p.h};
+}
+function rankClear(r,s){
+  const a=F.ranks[r], b=F.ranks[r-1], lim=0.8*Math.min(F.rankDist,1);
+  for(let sq=0;sq<F.W;sq++){
+    if(!a.sol[sq]) continue;
+    const pa=slotPos(sq,s);
+    for(let q=0;q<F.W;q++){ if(!b.sol[q]) continue; const pb=slotPos(q,b.s); if(Math.hypot(pa.x-pb.x,pa.y-pb.y)<lim) return false; }
+  }
+  return true;
+}
+
+/** Each soldier's displayed position and facing (with transitions), plus measured step speed. */
+function layoutSoldiers(dtBeats, snap){
+  const t=now();
+  F.ranks.forEach((rk,r)=>rk.sol.forEach((s,sq)=>{
+    if(!s) return;
+    const p = F.mode==="counter" ? F.cc.paths[sq].posAt(F.cc.headS[sq]-F.cc.depths[r]) : slotPos(sq,rk.s);
+    let x=p.x, y=p.y, face=p.h;
+    if(s.trans){ const u=(t-s.trans.t0)/s.trans.dur; if(u>=1) s.trans=null; else { const e=ease(u); x=lerp(s.trans.x,x,e); y=lerp(s.trans.y,y,e); } }
+    if(s.faceAnim){ const u=(t-s.faceAnim.t0)/s.faceAnim.dur; if(u>=1) s.faceAnim=null; else face+=s.faceAnim.off*(1-ease(u)); }
+    if(!snap && s.px!==null && dtBeats>0){ const v=Math.hypot(x-s.px,y-s.py)/dtBeats; s.spd=lerp(s.spd, Math.min(v,2), .25); }
+    if(snap) s.spd=0;
+    s.px=x; s.py=y; s.x=x; s.y=y; s.face=face;
+  }));
+}
+
+/* ---------- Snake rules ---------- */
+function spawnRecruit(){
+  const sol=allSoldiers();
+  for(let tries=0;tries<300;tries++){
+    const x=1+Math.floor(Math.random()*(SNAKE_W-2))+.5, y=1+Math.floor(Math.random()*(SNAKE_H-2))+.5;
+    if(sol.every(s=>Math.hypot(s.x-x,s.y-y)>2)){ G.recruits.push({x,y,face:Math.floor(Math.random()*8)*45*D2R,t:now()}); return; }
+  }
+}
+function addRecruitToFormation(){
+  const last=F.ranks[F.ranks.length-1], s=newSoldier();
+  let empty=-1; for(let sq=F.W-1;sq>=0;sq--) if(!last.sol[sq]){ empty=sq; break; }   // fill from the right file
+  if(empty>=0) last.sol[empty]=s;
+  else { const sol=new Array(F.W).fill(null); sol[F.W-1]=s; F.ranks.push({s:last.s-F.rankDist, sol}); }
+}
+function snakeRules(){
+  if(G.mode!=="snake"||G.over) return;
+  const sol=allSoldiers();
+  for(const s of sol) if(s.x<0.25||s.x>SNAKE_W-0.25||s.y<0.25||s.y>SNAKE_H-0.25) return broke("You marched into the wall");
+  // own formation: front rank vs every rank from the 3rd back (off during maneuvers)
+  if(F.mode==="column" && !G.busy && !sol.some(s=>s.trans) && F.ranks.length>2){
+    const front=F.ranks[0].sol.filter(Boolean);
+    for(let r=2;r<F.ranks.length;r++) for(const b of F.ranks[r].sol) if(b) for(const a of front)
+      if(Math.hypot(a.x-b.x,a.y-b.y)<0.55) return broke("You marched into your own formation");
+  }
+  for(let i=G.recruits.length-1;i>=0;i--){
+    const rc=G.recruits[i];
+    if(sol.some(s=>Math.hypot(s.x-rc.x,s.y-rc.y)<0.7)){
+      G.recruits.splice(i,1); G.score+=10; addRecruitToFormation(); spawnRecruit(); chime(true); updateHUD();
+    }
+  }
+}
+function broke(why){
+  G.over=true; G.move="halt"; G.sched=[];
+  if(G.score>hiScore){ hiScore=G.score; localStorage.setItem("formation.hi",hiScore); }
+  $("ovTitle").textContent="Formation broke"; $("ovText").textContent=why+". Score "+G.score+" · High "+hiScore;
+  $("overlay").classList.add("on"); chime(false); updateHUD();
+}
+
+/* ======================================================================
+   RENDERING
+====================================================================== */
+const cv=$("field"), ctx=cv.getContext("2d");
+let view={scale:16, ox:0, oy:0};
+const cam={x:0,y:0};
+function resize(){
+  const r=cv.getBoundingClientRect(), dpr=Math.min(2,window.devicePixelRatio||1);
+  cv.width=Math.max(1,Math.round(r.width*dpr)); cv.height=Math.max(1,Math.round(r.height*dpr));
+}
+window.addEventListener("resize",resize);
+function computeView(){
+  const W=cv.width, H=cv.height;
+  if(G.mode==="snake"){ const sc=Math.min(W/SNAKE_W, H/SNAKE_H); view={scale:sc, ox:(W-SNAKE_W*sc)/2, oy:(H-SNAKE_H*sc)/2}; return; }
+  const sol=allSoldiers(); let cx=0,cy=0; sol.forEach(s=>{cx+=s.x;cy+=s.y;}); cx/=sol.length||1; cy/=sol.length||1;
+  cam.x=lerp(cam.x,cx,.08); cam.y=lerp(cam.y,cy,.08);
+  const sc=Math.min(W,H)/(G.mode==="practice"? 6 : 10);
+  view={scale:sc, ox:W/2-cam.x*sc, oy:H/2-cam.y*sc};
+}
+function draw(phase){
+  computeView();
+  const W=cv.width, H=cv.height, sc=view.scale;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle=G.mode==="snake"?"#3b4220":"#9aa063"; ctx.fillRect(0,0,W,H);
+  ctx.setTransform(sc,0,0,sc,view.ox,view.oy);
+  ctx.lineWidth=1/sc;
+  if(G.mode==="snake"){
+    ctx.fillStyle="#9aa063"; ctx.fillRect(0,0,SNAKE_W,SNAKE_H);
+    ctx.strokeStyle="rgba(0,0,0,.08)";
+    for(let x=0;x<=SNAKE_W;x++){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,SNAKE_H); ctx.stroke(); }
+    for(let y=0;y<=SNAKE_H;y++){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(SNAKE_W,y); ctx.stroke(); }
+    ctx.strokeStyle="#c3b091"; ctx.lineWidth=0.18; ctx.strokeRect(0.09,0.09,SNAKE_W-.18,SNAKE_H-.18);
+    for(const rc of G.recruits) drawRecruit(rc);
+  } else {
+    // open drill field: grid scrolls with the camera, every 5th line brighter
+    const x0=-view.ox/sc, y0=-view.oy/sc, x1=x0+W/sc, y1=y0+H/sc;
+    for(let x=Math.floor(x0);x<=x1;x++){ ctx.strokeStyle= x%5===0?"rgba(230,220,195,.22)":"rgba(0,0,0,.07)"; ctx.beginPath(); ctx.moveTo(x,y0); ctx.lineTo(x,y1); ctx.stroke(); }
+    for(let y=Math.floor(y0);y<=y1;y++){ ctx.strokeStyle= y%5===0?"rgba(230,220,195,.22)":"rgba(0,0,0,.07)"; ctx.beginPath(); ctx.moveTo(x0,y); ctx.lineTo(x1,y); ctx.stroke(); }
+  }
+  for(let r=F.ranks.length-1;r>=0;r--) F.ranks[r].sol.forEach((s,sq)=>{ if(s) drawSoldier(s, phase, sq); });
+}
+function drawRecruit(rc){
+  const pulse=.5+.5*Math.sin((now()-rc.t)/250);
+  ctx.fillStyle=`rgba(255,215,90,${.2+.25*pulse})`; ctx.beginPath(); ctx.arc(rc.x,rc.y,.5,0,Math.PI*2); ctx.fill();
+  drawBody(rc.x,rc.y,rc.face,0,0,"#d9b04a","#6b4f12",{posture:"attention"});
+}
+/** A soldier: a helmet dot with two clearly visible legs and boots, swinging on the beat.
+    Stride length = the soldier's real displacement, so pivot-file half steps are visibly short. */
+function drawSoldier(s, phase, sq){
+  const full = G.tempo==="double"?1.2:1.0;
+  const amp = clamp(s.spd/full, 0, 1.25);
+  const halted = G.move==="halt" && F.mode!=="counter";
+  const inPlace = !halted && marching() && amp<0.2;            // mark time, pivot, closing, waiting rank
+  const rightFile = sq===F.W-1;
+  const k = G.mode==="snake" ? 1.2 : 1;                      // slightly larger sprites on the small snake field
+  ctx.save(); ctx.translate(s.x,s.y); ctx.scale(k,k);
+  drawBody(0,0,s.face, halted?0:amp, phase, "#3e4a1c","#151905", {
+    posture:halted?G.posture:"attention", dress:G.dress && !rightFile, eyes:(G.eyes||G.dress) && !(marching() && rightFile && G.eyes) && !(G.dress && rightFile),
+    lift: inPlace? 1-amp/0.2 : 0 });
+  ctx.restore();
+}
+function drawBody(x,y,h,amp,phase,fill,stroke,opt){
+  const d=dirV(h), n=nrmV(h);
+  // phase = beats since the last LEFT strike (0..2): left boot forward at 0, right boot forward at 1
+  const swing=Math.cos(Math.PI*phase), L=0.42*amp*swing;
+  const lift=opt.lift||0, liftL=lift*Math.max(0,Math.sin(Math.PI*phase)), liftR=lift*Math.max(0,-Math.sin(Math.PI*phase));
+  const spread=(opt.posture==="parade"||opt.posture==="standease"||opt.posture==="atease")? 0.21 : 0.12;
+  const rest=amp<0.05? 0.22 : 0.04;   // boots peek out in front of the helmet even at the halt
+  const legs=[[-spread, L+rest, liftL], [spread, -L+rest, liftR]];
+  ctx.lineCap="round";
+  for(const [lat,fwd,lf] of legs){
+    const hx=x+n[0]*lat*.5, hy=y+n[1]*lat*.5;
+    const fx=x+n[0]*lat+d[0]*(fwd+lf*.14), fy=y+n[1]*lat+d[1]*(fwd+lf*.14);
+    ctx.strokeStyle="#1f1608"; ctx.lineWidth=0.12;
+    ctx.beginPath(); ctx.moveTo(hx,hy); ctx.lineTo(fx,fy); ctx.stroke();
+    ctx.fillStyle= lf>0.3? "#8a6a3a" : "#120c05";       // a raised boot shows lighter (knee up)
+    ctx.beginPath(); ctx.ellipse(fx+d[0]*.03,fy+d[1]*.03,0.085+lf*.03,0.125+lf*.03,h,0,Math.PI*2); ctx.fill();
+  }
+  if(opt.dress){ ctx.strokeStyle=fill; ctx.lineWidth=0.09; ctx.beginPath(); ctx.moveTo(x-n[0]*.15,y-n[1]*.15); ctx.lineTo(x-n[0]*.62,y-n[1]*.62); ctx.stroke(); }
+  ctx.fillStyle=fill; ctx.strokeStyle=stroke; ctx.lineWidth=0.05;
+  ctx.beginPath(); ctx.arc(x,y,0.19,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  const fd=dirV(h + (opt.eyes? 45*D2R : 0));               // face marker: eyes right turns it 45°
+  ctx.fillStyle="#e6dcc3"; ctx.beginPath(); ctx.arc(x+fd[0]*.11,y+fd[1]*.11,0.05,0,Math.PI*2); ctx.fill();
+  if(opt.posture && opt.posture!=="attention"){ ctx.fillStyle="#120c05"; ctx.beginPath(); ctx.arc(x-d[0]*.21,y-d[1]*.21,0.05,0,Math.PI*2); ctx.fill(); } // hands behind back
+}
+
+/* ---------- Meter: pitch dots + loudness bars; last command's prep (blue) and execution (green/red) ---------- */
+const mv=$("meter"), mctx=mv.getContext("2d");
+let lastAnalysis=null;
+function drawMeter(){
+  const W=mv.width, H=mv.height, t1=now(), span=4000, X=t=>W-(t1-t)/span*W;
+  mctx.fillStyle="#1d2010"; mctx.fillRect(0,0,W,H);
+  if(lastAnalysis && lastAnalysis.ex){
+    for(const s of (lastAnalysis.prepSegs||[])){ mctx.fillStyle="rgba(120,160,220,.25)"; mctx.fillRect(X(s.t0),0,X(s.t1)-X(s.t0),H); }
+    const e=lastAnalysis.ex; mctx.fillStyle=lastAnalysis.ok?"rgba(120,220,100,.32)":"rgba(240,110,90,.32)"; mctx.fillRect(X(e.t0),0,Math.max(2,X(e.t1)-X(e.t0)),H);
+  }
+  const th=voiceThresh(), dbY=db=>H-clamp((db+70)/60,0,1)*H;
+  mctx.strokeStyle="rgba(230,220,195,.35)"; mctx.setLineDash([3,3]); mctx.beginPath(); mctx.moveTo(0,dbY(th)); mctx.lineTo(W,dbY(th)); mctx.stroke(); mctx.setLineDash([]);
+  for(const f of frames){ if(f.t<t1-span) continue; mctx.fillStyle=f.db>th?"#c3b091":"#4a5230"; mctx.fillRect(X(f.t),dbY(f.db),W/160,H-dbY(f.db)); }
+  for(const f of frames){ if(f.t<t1-span||!f.hz) continue; const y=H-clamp(Math.log2(f.hz/70)/Math.log2(450/70),0,1)*H; mctx.fillStyle="#ff9d3a"; mctx.fillRect(X(f.t)-1.5,y-1.5,3,3); }
+  mctx.fillStyle="rgba(230,220,195,.75)"; mctx.font="10px system-ui"; mctx.fillText("pitch ●   volume ▮   prep ▭ blue · exec ▭ green/red", 4, 11);
+  if(!micOK){ mctx.fillStyle="#ff9d8a"; mctx.fillText("mic off: inflection not measured", 4, H-5); }
+}
+
+/* ======================================================================
+   SPEECH RECOGNITION (continuous, interim results)
+====================================================================== */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec=null, recOn=false, session=0, lastCmdT=0, ttsBusy=false, ttsQuietSince=-Infinity;
+const consumed=new Set();
+function startRecognition(){
+  if(!SR) return false;
+  rec=new SR(); rec.continuous=true; rec.interimResults=true; rec.lang="en-US"; rec.maxAlternatives=3;
+  rec.onstart=()=>{ session++; };
+  rec.onresult=e=>{
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const res=e.results[i], key=session+":"+i;
+      $("heardTxt").textContent=res[0].transcript;
+      if(consumed.has(key)) continue;
+      if(ttsBusy || now()<ttsQuietSince){ $("heardTxt").textContent="(ignored: cadence voice) "+res[0].transcript; continue; } // never obey our own TTS
+      let hit=null;
+      for(let a=0;a<res.length && !hit;a++){ const p=parseCommand(res[a].transcript); if(p) hit=[p,res[a].transcript]; }
+      if(hit){ consumed.add(key); onCommandHeard(hit[0], hit[1]); }
+      else if(res.isFinal && /\b(march|halt|face|rest|ease|dress|front)\b/i.test(res[0].transcript)) flash("NOT A VALID COMMAND","bad","Heard: "+res[0].transcript);
+    }
+  };
+  rec.onerror=e=>{ if(e.error==="not-allowed"||e.error==="service-not-allowed"){ recOn=false; flash("SPEECH RECOGNITION BLOCKED","bad","Allow microphone and speech access, then reload. ("+e.error+")"); } };
+  rec.onend=()=>{ if(recOn) setTimeout(()=>{ try{ rec.start(); }catch(_){} }, 150); };  // mobile sessions end often
+  recOn=true; try{ rec.start(); }catch(_){}
+  return true;
+}
+
+/** A command was parsed: wait for the voice to stop, then judge inflection, foot, and state. */
+function onCommandHeard(p, raw){
+  const heardAt=now();
+  if(heardAt-lastCmdT<600) return; lastCmdT=heardAt;
+  const poll=()=>{
+    if(micOK && now()-lastLoudT<150 && now()-heardAt<900) return setTimeout(poll,40); // execution word still sounding
+    judge(p, raw, heardAt, false);
+  };
+  poll();
+}
+function judge(p, raw, heardAt, typed){
+  const c=p.cmd, S=SENS[settings.sens];
+  const a = c.single? {ok:true, detail:"One-part command (no inflection needed)"} : typed? {ok:true, detail:"Typed (debug): inflection skipped"} : analyseInflection(c, heardAt);
+  lastAnalysis=a;
+  if(G.mode==="practice"){ reportVerdict(c,a,footCheck(c,a)); return; }
+  if(!a.ok) return reportVerdict(c,a);
+  const why=canExecute(c);
+  if(why) return reportVerdict(c,{ok:false,reason:"Can't execute",detail:why});
+  const fc=footCheck(c,a);
+  if(fc && fc.wrong && S.foot==="reject") return reportVerdict(c,{ok:false,reason:"Wrong foot",detail:`Call it as the ${fc.want==="L"?"left":"right"} foot strikes`,ex:a.ex,prepSegs:a.prepSegs}, fc);
+  // Executed on the next beat; foot-specific commands wait for the correct foot while marching.
+  const k=(marching() && (c.foot==="L"||c.foot==="R")) ? nextBeat(c.foot) : clock.k;
+  at(k, ()=>{ if(!canExecute(c) || c.id==="fallin") execute(c); });
+  reportVerdict(c, a, fc);
+}
+function footCheck(c,a){
+  if(!(c.foot==="L"||c.foot==="R") || !(marching()||G.mode==="practice") || !a || !a.ex) return null;
+  const f=footAtTime(a.ex.peakT);
+  return {want:c.foot, got:f.foot, wrong:f.foot!==c.foot};
+}
+function reportVerdict(c,a,fc){
+  const el=$("verdict");
+  if(a.ok){
+    const wrong = fc && fc.wrong && SENS[settings.sens].foot!=="ignore";
+    el.className = (wrong||a.warn) ? "warn" : "ok";
+    el.textContent = (wrong? "WRONG FOOT (accepted): " : "ACCEPTED: ") + c.name;
+    $("detail").textContent = (wrong?`Call it as the ${fc.want==="L"?"left":"right"} foot strikes. `:"") + (a.warn||a.detail||"");
+    chime(true);
+  } else {
+    el.className="bad"; el.textContent = a.reason.toUpperCase()+": "+c.name;
+    $("detail").textContent = a.detail||""; chime(false);
+  }
+}
+function flash(msg,cls,detail){ const el=$("verdict"); el.className=cls; el.textContent=msg; $("detail").textContent=detail||""; }
+
+/* ======================================================================
+   CADENCE TOOLBAR: call and response, every call starting on the LEFT foot
+====================================================================== */
+const cad = { on:false, item:null, line:0, half:0, beat:-1 };
+function fillCadences(){
+  const sel=$("cadSel"); sel.innerHTML="";
+  for(const c of FormationCadences.all()){ const o=document.createElement("option"); o.value=c.id; o.textContent=c.title+(c.tempo==="double"?" (double time)":""); sel.appendChild(o); }
+  cad.item=FormationCadences.all()[0]; renderCad();
+}
+document.addEventListener("cadencepacks", fillCadences);
+function cadStart(){ cad.item=FormationCadences.all().find(c=>c.id===$("cadSel").value); cad.on=true; cad.line=0; cad.half=0; cad.beat=-1; $("cadPlay").textContent="Stop"; renderCad(); }
+function cadStop(){ cad.on=false; $("cadPlay").textContent="Start"; if(window.speechSynthesis) speechSynthesis.cancel(); ttsBusy=false; renderCad(); }
+function cadOnBeat(k){
+  if(!cad.on||!cad.item) return;
+  if(!marching() && G.mode!=="practice") return;            // the cadence pauses at the halt
+  if(cad.beat<0){ if(footOf(k)!=="L") return; cad.beat=0; } // start on the LEFT foot
+  else if(++cad.beat>=4){ cad.beat=0; cad.half^=1; if(cad.half===0) cad.line=(cad.line+1)%cad.item.lines.length; }
+  if(cad.beat===0){
+    const ln=cad.item.lines[cad.line], mode=$("cadVoice").value;
+    if(mode==="both" || (mode==="calls" && cad.half===0)) speak(cad.half===0?ln.c:ln.r);
+  }
+  renderCad();
+}
+const esc=s=>String(s).replace(/[&<>"]/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[ch]));
+function renderCad(){
+  const box=$("cadLines");
+  if(!cad.item){ box.innerHTML=""; return; }
+  const ln=cad.item.lines[cad.line], nx=cad.item.lines[(cad.line+1)%cad.item.lines.length];
+  const dots=cad.on&&cad.beat>=0 ? "●".repeat(cad.beat+1)+"○".repeat(3-cad.beat) : "";
+  box.innerHTML=`<div class="call"><span class="${cad.on&&cad.half===0?"now":""}">${esc(ln.c)}</span></div>
+    <div class="resp"><span class="${cad.on&&cad.half===1?"now":""}">↳ ${esc(ln.r)}</span> <small>${dots}</small></div>
+    <div class="lic">Next: ${esc(nx.c)}<br>${esc(cad.item.license)} Source: ${esc(cad.item.source)}</div>`;
+}
+function speak(text){
+  if(!window.speechSynthesis) return;
+  const u=new SpeechSynthesisUtterance(text.replace(/…/g,","));
+  const words=text.split(/\s+/).length, secs=4*clock.period/1000;
+  u.rate=clamp(words/(secs*2.6),0.8,1.8); u.pitch=0.8;
+  ttsBusy=true;
+  u.onend=u.onerror=()=>{ ttsBusy=false; ttsQuietSince=now()+500; };  // also ignore the mic for 0.5 s after
+  speechSynthesis.speak(u);
+}
+
+/* ======================================================================
+   HUD / UI
+====================================================================== */
+function updateHUD(){
+  $("score").textContent=G.score; $("hi").textContent=hiScore; $("hiStart").textContent=hiScore;
+  $("strength").textContent=allSoldiers().length; $("bpm").textContent=Math.round(bpm());
+  $("hudScore").style.visibility=G.mode==="snake"?"visible":"hidden";
+}
+function setStateTag(){
+  if(!G) return;
+  const m={halt:"AT THE HALT",forward:"FORWARD",mark:"MARK TIME",half:"HALF STEP",rstep:"RIGHT STEP",lstep:"LEFT STEP",back:"BACKWARD",pivot:"REAR MARCH",closing:"HALTING"}[G.move]||G.move;
+  const post = G.move==="halt" ? ({attention:"ATTENTION",parade:"PARADE REST",standease:"STAND AT EASE",atease:"AT EASE"}[G.posture]) : (G.tempo==="double"?"DOUBLE TIME":"QUICK TIME");
+  $("stateTag").innerHTML=(F&&F.mode==="counter"?"COUNTER COLUMN":m)+"<br>"+post+(G.dress?" · DRESS RIGHT":"")+(G.eyes?" · EYES RIGHT":"")+(F&&F.interval<1?" · CLOSE INT":"")+(F&&F.rankDist>1?" · OPEN RANKS":"");
+}
+function show(id){ document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("on",s.id===id)); }
+function buildReference(){
+  document.querySelector("#refTable tbody").innerHTML=CMDS.map(c=>`<tr><td class="cmd">${esc(c.name)}</td><td>${c.foot==="L"?"Left":c.foot==="R"?"Right":c.foot==="either"?"Either":"—"}</td>
+    <td><span class="tag">${c.when==="halt"?"at halt":c.when==="march"?"marching":"any"}</span>${esc(c.desc)}</td></tr>`).join("");
+}
+
+/* ======================================================================
+   MAIN LOOP
+====================================================================== */
+let running=false, lastFrame=0;
+function onBeat(k){
+  curBeat=k;
+  const due=G.sched.filter(a=>a.k<=k); G.sched=G.sched.filter(a=>a.k>k);
+  for(const a of due) a.fn();
+  const foot=footOf(k), active=marching()||G.mode==="practice";
+  if(active) tick(foot);
+  $("fL").classList.toggle("hit", active && foot==="L");
+  $("fR").classList.toggle("hit", active && foot==="R");
+  cadOnBeat(k);
+  updateHUD(); setStateTag();
+}
+function step(t){
+  const dt=Math.min(100, t-lastFrame); lastFrame=t;
+  clock.period=60000/bpm();
+  if(t-clock.nextT>1000) clock.nextT=t;                     // resync after the tab was hidden
+  while(t>=clock.nextT){ clock.lastT=clock.nextT; const k=clock.k++; clock.nextT+=clock.period; onBeat(k); }
+  const dtBeats=dt/clock.period;
+  if(G.mode!=="practice") advance(dtBeats);
+  layoutSoldiers(dtBeats,false);
+  snakeRules();
+  const frac=clamp((t-clock.lastT)/clock.period,0,1);
+  const phase=(footOf(clock.k-1)==="L"?0:1)+frac;           // beats since the last LEFT strike
+  draw(marching()||G.mode==="practice"?phase:0);
+  drawMeter();
+}
+function frame(){ if(!running) return; step(now()); requestAnimationFrame(frame); }
+async function begin(mode){
+  settings.sens=$("sens").value; settings.unit=$("unitWord").value; settings.tick=$("tickOn").checked;
+  ensureAudio();
+  if(!micOK && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) await startMic();
+  if(!recOn) startRecognition();
+  newGame(mode);
+  show("game"); resize();
+  if(mode==="practice"){ G.move="mark"; flash("INFLECTION PRACTICE","ok",'Say any command, e.g. "Column right… MARCH!" Watch the meter.'); }
+  else flash(mode==="snake"?"SNAKE: FALL IN":"DRILL FIELD","ok",`Say "Forward… MARCH!" to step off.`);
+  if(!SR) $("detail").textContent="Speech recognition isn't supported in this browser. Only the inflection meter works.";
+  clock.lastT=now(); clock.nextT=now()+clock.period; lastFrame=now();
+  if(!running){ running=true; requestAnimationFrame(frame); }
+}
+
+/* ---------- Wire up the UI ---------- */
+document.querySelectorAll("[data-mode]").forEach(b=>b.addEventListener("click",()=>begin(b.dataset.mode)));
+$("btnRef").onclick=()=>show("ref"); $("refBack").onclick=()=>show("start");
+$("btnQuit").onclick=()=>{ running=false; cadStop(); show("start"); $("hiStart").textContent=hiScore; };
+$("ovBtn").onclick=()=>fallIn();
+$("cadToggle").onclick=()=>$("cadBar").classList.toggle("collapsed");
+$("cadPlay").onclick=()=>cad.on?cadStop():cadStart();
+$("cadSel").onchange=()=>{ if(cad.on) cadStart(); else { cad.item=FormationCadences.all().find(c=>c.id===$("cadSel").value); cad.line=0; renderCad(); } };
+if(!SR) $("noSR").classList.add("on");
+if(DEBUG) $("debug").classList.add("on");
+const dbgSend=()=>{ const v=$("dbgIn").value, p=parseCommand(v); $("heardTxt").textContent=v; if(!p) return flash("NOT A VALID COMMAND","bad",v); judge(p,v,now(),true); $("dbgIn").value=""; };
+$("dbgGo").onclick=dbgSend; $("dbgIn").addEventListener("keydown",e=>{ if(e.key==="Enter") dbgSend(); });
+$("hiStart").textContent=hiScore;
+fillCadences(); buildReference();
+
+/* ---------- Test hook (automated tests only; not used in normal play) ---------- */
+window.FG = {
+  parse:t=>{ const p=parseCommand(t); return p? p.cmd.id : null; },
+  cmd(text){ const p=parseCommand(text); if(!p) return "invalid"; judge(p,text,now(),true); return p.cmd.id; },
+  /** Start a mode without mic/speech (headless): */
+  startHeadless(mode){ newGame(mode); show("game"); resize(); clock.lastT=now(); clock.nextT=now()+clock.period; lastFrame=now(); },
+  /** Advance the simulation by ms in 16 ms steps (virtual time), then render. */
+  sim(ms){ let t=lastFrame; const end=t+ms; while(t<end){ t+=16; simNow=t; step(t); } },
+  state:()=>({move:G.move, tempo:G.tempo, fmode:F.mode, W:F.W, ranks:F.ranks.length, busy:G.busy, over:G.over, score:G.score, posture:G.posture,
+             heading:Math.round(((F.mode==="column"?F.path.posAt(F.ranks[0].s).h:0)/D2R%360+360)%360),
+             soldiers:allSoldiers().map(s=>[+s.x.toFixed(2),+s.y.toFixed(2),Math.round(((s.face/D2R)%360+360)%360)])}),
+  get G(){return G;}, get F(){return F;}, clock, settings, frames,
+  analyse:(id,t)=>{ micOK=true; return analyseInflection(CMD[id], t); },
+};
+</script>
+</body></html>

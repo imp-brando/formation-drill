@@ -1,4 +1,4 @@
-// Drill sergeant: centred on the formation's right side (2 steps out, middle of the depth), at all times,
+// Drill sergeant: centred on the formation's LEFT side (2 steps out, middle of the depth), at all times,
 // never on top of a soldier, and the default formation is 4 x 4.
 const puppeteer=require('puppeteer-core'), P=require('path');
 const CMDS={rflank:"right flank march",lflank:"left flank march",rear:"rear march",colL:"column left march",colR:"column right march",counter:"counter column march",halt:"platoon halt",fwd:"forward march",colHL:"column half left march",mark:"mark time march",lface:"left face",about:"about face"};

@@ -468,10 +468,10 @@ function broke(why){
 }
 
 /* ======================================================================
-   DRILL SERGEANT: centred on the formation's RIGHT side (relative to the way it faces), 2 steps out
-   from the right flank file, at the middle of its depth. Not part of the formation: no walls, no
+   DRILL SERGEANT: centred on the formation's LEFT side (relative to the way it faces), 2 steps out
+   from the left flank file, at the middle of its depth. Not part of the formation: no walls, no
    self-collision, can't pick up recruits. He walks in cadence (up to 1.3 steps per beat on post, double-timing up to 2 when relocating) and
-   goes AROUND the end of the formation when the right side changes (rear march, flanks, facings).
+   goes AROUND the end of the formation when the left side changes (rear march, flanks, facings).
 ====================================================================== */
 const SGT_OUT=2, SGT_CLEAR=0.8;
 function sgtFrame(){
@@ -489,7 +489,7 @@ function sgtFrame(){
   return {cx,cy,h,d,n,umin,umax,vmin,vmax,sol};
 }
 const sgtXY=(fr,u,v)=>[fr.cx+fr.d[0]*u+fr.n[0]*v, fr.cy+fr.d[1]*u+fr.n[1]*v];
-function sgtTarget(fr){ return sgtXY(fr,(fr.umin+fr.umax)/2, fr.vmax+SGT_OUT); }
+function sgtTarget(fr){ return sgtXY(fr,(fr.umin+fr.umax)/2, fr.vmin-SGT_OUT); }
 function sgtInit(){
   G.sgt=null; const fr=sgtFrame(); if(!fr) return;
   const [x,y]=sgtTarget(fr);
@@ -501,9 +501,9 @@ function sgtUpdate(dt){
   S.h=fr.h;
   const per=clock.period, full=G.tempo==="double"?1.2:1.0;
   const us=(S.x-fr.cx)*fr.d[0]+(S.y-fr.cy)*fr.d[1], vs=(S.x-fr.cx)*fr.n[0]+(S.y-fr.cy)*fr.n[1];
-  const vt=fr.vmax+SGT_OUT, ut=(fr.umin+fr.umax)/2;
+  const vt=fr.vmin-SGT_OUT, ut=(fr.umin+fr.umax)/2;
   let wu=ut, wv=vt, route="post";
-  if(vs < fr.vmax+1.2){                                          // not on the right side: go around an end of the formation
+  if(vs > fr.vmin-1.2){                                          // not on the left side: go around an end of the formation
     const inU = us>fr.umin-1.4 && us<fr.umax+1.4;
     if(inU){
       const marchingFwd = marching() && F.mode!=="counter";

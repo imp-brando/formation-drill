@@ -724,7 +724,7 @@ window.FG = {
   addRecruit(){ addRecruitToFormation(); },
   sgt(){ const S=G.sgt; if(!S) return null; const fr=sgtFrame(); const u=(S.x-fr.cx)*fr.d[0]+(S.y-fr.cy)*fr.d[1], v=(S.x-fr.cx)*fr.n[0]+(S.y-fr.cy)*fr.n[1];
     const [tx,ty]=sgtTarget(fr); let md=1e9; for(const s of fr.sol) md=Math.min(md,Math.hypot(s.x-S.x,s.y-S.y));
-    return {x:+S.x.toFixed(2), y:+S.y.toFixed(2), h:Math.round((fr.h/D2R%360+360)%360), out:+(v-fr.vmax).toFixed(2), depthOff:+(u-(fr.umin+fr.umax)/2).toFixed(2),
+    return {x:+S.x.toFixed(2), y:+S.y.toFixed(2), h:Math.round((fr.h/D2R%360+360)%360), out:+(fr.vmin-v).toFixed(2), depthOff:+(u-(fr.umin+fr.umax)/2).toFixed(2),
             toTarget:+Math.hypot(tx-S.x,ty-S.y).toFixed(2), minDist:+md.toFixed(2), route:S.route}; },
   frame(db,hz){ pushFrame(now(), db, hz||0); },                  // feed the voice meter (tests)
   meter(on){ micOK=on; if(on) noiseFloor=-60; },

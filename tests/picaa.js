@@ -9,7 +9,7 @@ const puppeteer=require('puppeteer-core'), P=require('path');
  const res=await p.evaluate(()=>{
   let slot=0;
   const say=(t,fin)=>{ const r=[{transcript:t,confidence:.9}]; r.isFinal=!!fin; const results=[]; for(let i=0;i<=slot;i++) results.push(r); FG.handleResult({resultIndex:slot++,results}); };
-  const cmds=[["column left march","L"],["column right march","R"],["column half left march","L"],["rear march","R"],["right flank march","R"],["left flank march","L"],["platoon halt","either"],["counter column march","either"],["mark time march","either"],["change step march","R"]];
+  const cmds=[["column left march","L"],["column right march","R"],["column half left march","L"],["rear march","R"],["right flank march","R"],["left flank march","L"],["platoon halt","either"],["counter column march","either"],["mark time march","either"],["change step march","R"],["colm lef harch","L"],["palm left much","L"],["reah harch","R"],["ri flank hut","R"],["platoon haaalt","either"]];
   const out={}, foot=k=>(((k%2)+2)%2===0)?"L":"R";
   for(const [cmd,want] of cmds){
     const rows=[];

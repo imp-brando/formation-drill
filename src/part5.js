@@ -134,7 +134,8 @@ let micMode = ["auto","rec","both"].includes(localStorage.getItem("formation.mic
 let coexist = localStorage.getItem("formation.coexist");   // "yes" | "no" | null (untested)
 let meterOffReason = "", pendingProbe=false, probe=null;
 const normText = t => t.toLowerCase().replace(/[^a-z0-9' ]+/g," ").replace(/\s+/g," ").trim();
-function setStatus(txt, cls){ const el=$("srStatus"); if(el){ el.textContent=txt; el.className=cls||""; } }
+let statusHoldUntil=0;   // keep "Heard … → understood as …" readable across Android's constant session restarts
+function setStatus(txt, cls, hold){ const el=$("srStatus"); if(!el) return; if(!hold && now()<statusHoldUntil && cls==="ok") return; el.textContent=txt; el.className=cls||""; statusHoldUntil = hold ? now()+hold : 0; }
 
 /* Grammar hint: Chrome mostly ignores it, but it's harmless and helps engines that use it. */
 const GRAMMAR_PHRASES=["column right march","column left march","column half right march","column half left march","counter column march","rear march","right flank march","left flank march","forward march","mark time march","half step march","change step march","double time march","quick time march","right step march","left step march","backward march","open ranks march","close ranks march","extend march","close march","platoon halt","platoon attention","right face","left face","about face","parade rest","stand at ease","at ease","dress right dress","eyes right","ready front","fall in"];
@@ -147,7 +148,7 @@ function addGrammar(r){
 }
 function makeRec(){
   const r=new SR();
-  r.lang="en-US"; r.interimResults=true; r.maxAlternatives=5;
+  r.lang="en-US"; r.interimResults=true; r.maxAlternatives=8;
   // Android: short sessions restarted immediately are the most reliable. Hold-to-talk stays open
   // until release, so a pause before the execution word can't end it.
   r.continuous = ptt || !IS_ANDROID;
@@ -202,34 +203,36 @@ function handleResult(e){
   let triggerProbe=false;
   for(let i=e.resultIndex;i<e.results.length;i++){
     const res=e.results[i], key=session+":"+i, top=res[0].transcript.trim();
-    $("heardTxt").textContent=top;
+    $("heardTxt").textContent=top; $("heard").className="";
     if(ttsBusy || now()<ttsQuietSince){ $("heardTxt").textContent="(ignored: cadence voice) "+top; continue; } // never obey our own TTS
     let hit=null, firstFresh=null;
     const pend = pendingPrep && now()-pendingPrep.t<PREP_WAIT_MS ? pendingPrep.text : null;
-    // try every alternative Chrome offers, first alone, then joined to a prep heard just before
+    // score every alternative Chrome offers (alone, then joined to a prep heard just before); keep the best
     for(let pass=0; pass<2 && !hit; pass++){
       if(pass===1 && !pend) break;
-      for(let a=0;a<res.length && !hit;a++){
+      for(let a=0;a<res.length;a++){
         const n=normText(res[a].transcript), fresh=freshPart(key,n);
         if(firstFresh===null) firstFresh=fresh;
         if(!fresh) continue;
         const p=parseCommand(pass===0? fresh : pend+" "+fresh);
-        if(p) hit={p, raw:(pass===0?"":pend+" … ")+res[a].transcript.trim(), n};
+        if(p && (!hit || p.score>hit.p.score+1e-9)) hit={p, raw:(pass===0?"":pend+" … ")+res[a].transcript.trim(), n};
       }
     }
     if(hit){
       consumedText.set(key, hit.n); sessionText=hit.n; pendingPrep=null;
-      setStatus(`Heard "${hit.raw}" → ${hit.p.cmd.name}`, "ok");
+      $("heardTxt").textContent=hit.raw; $("heard").className="";
+      const how = hit.p.via==="sound-alike" ? " (sound-alike)" : hit.p.via==="your voice" ? " (your voice)" : "";
+      setStatus(`Heard "${hit.raw}" → understood as ${hit.p.cmd.name.toUpperCase()}${how}`, "ok", 4000);
       onCommandHeard(hit.p, hit.raw); triggerProbe=true;
     } else if(res.isFinal && firstFresh){
       triggerProbe=true;
-      const prep=parsePrepOnly(firstFresh);
+      const prep=parsePrepOnly(firstFresh) || (settings.clarity!=="exact" && fuzzyPrepOnly(firstFresh));
       if(prep){
         pendingPrep={text:firstFresh, t:now()}; picaaPrep();
-        setStatus(`Heard "${top}" → ${prep.name.split(",")[0]}… waiting for ${prep.exec}`, "ok");
+        setStatus(`Heard "${top}" → understood as ${prep.name.split(",")[0].toUpperCase()}… waiting for ${prep.exec}`, "ok", 3500);
       } else {
-        setStatus(`Heard "${top}": not a drill command`, "warn");
-        if(hasExecWord(firstFresh)) flash("NOT A VALID COMMAND","bad","Heard: "+top);
+        // not a drill command: discard quietly (no flash, no penalty)
+        $("heard").className="faint"; $("heardTxt").textContent=top+" (ignored)";
       }
       consumedText.set(key, normText(res[0].transcript));
     }
@@ -496,6 +499,60 @@ async function begin(mode){
 /* ---------- Wire up the UI ---------- */
 document.querySelectorAll("[data-mode]").forEach(b=>b.addEventListener("click",()=>begin(b.dataset.mode)));
 $("btnRef").onclick=()=>show("ref"); $("refBack").onclick=()=>show("start");
+$("clarity").value=settings.clarity;
+$("clarity").addEventListener("change",()=>{ settings.clarity=$("clarity").value; localStorage.setItem("formation.clarity",settings.clarity); });
+
+/* ---------- Train my voice: say each core command twice; keep what Chrome hears as personal aliases ---------- */
+const TRAIN_IDS=["forward","halt","colL","colR","colHL","colHR","lflank","rflank","rear","counter","mark","halfstep","change","double","quick"];
+const trainPhrase=id=> id==="halt" ? settings.unit.toUpperCase()+", HALT" : CMD[id].name.toUpperCase();
+let trainI=0, trainTake=0, trainRecObj=null;
+function trainRender(){
+  $("trainStep").textContent=`Command ${trainI+1} of ${TRAIN_IDS.length} · take ${trainTake+1} of 2`;
+  $("trainCmd").textContent=trainPhrase(TRAIN_IDS[trainI]);
+  const all=Object.entries(userAliases).flatMap(([id,l])=>(l||[]).map(ph=>[id,ph]));
+  $("trainCount").textContent=all.length;
+  $("trainList").innerHTML=all.map(([id,ph])=>`"${esc(ph)}" → ${esc(CMD[id].name)}`).join("<br>")||"<i>Nothing yet.</i>";
+}
+function trainStopRec(){ try{ if(trainRecObj){ trainRecObj.onresult=null; trainRecObj.onend=null; trainRecObj.abort(); } }catch(_){} trainRecObj=null; $("trainRec").classList.remove("held"); }
+/** Store what Chrome heard for this command. Skips guesses that are already another command. Returns notes for display. */
+function trainLearn(id, transcripts){
+  const notes=[]; const list=userAliases[id]||(userAliases[id]=[]);
+  for(const raw of transcripts){
+    const n=normText(raw); if(!n || n.split(" ").length<2) continue;
+    const ex=parseExact(n), fz=ex?null:fuzzyParse(n);
+    const got=(ex||fz)&&(ex||fz).cmd.id;
+    if(got===id){ notes.push(`"${raw}" ✓ already understood`); continue; }
+    if(got && got!==id){ notes.push(`"${raw}" skipped (sounds like ${CMD[got].name})`); continue; }
+    if(!list.includes(n)){ list.push(n); notes.push(`"${raw}" → saved`); }
+  }
+  if(list.length>12) list.splice(0,list.length-12);
+  if(!list.length) delete userAliases[id];
+  saveAliases(); return notes;
+}
+function trainNext(){ trainTake++; if(trainTake>=2){ trainTake=0; trainI=Math.min(TRAIN_IDS.length-1,trainI+1); if(trainI===TRAIN_IDS.length-1 && trainTake===0){} } trainRender(); }
+$("btnTrain").onclick=()=>{ if(recOn) stopListening(); trainI=0; trainTake=0; $("trainHeard").textContent=""; trainRender(); show("train"); };
+$("trainBack").onclick=()=>{ trainStopRec(); show("start"); };
+$("trainSkip").onclick=()=>{ trainStopRec(); trainTake=0; trainI=(trainI+1)%TRAIN_IDS.length; $("trainHeard").textContent=""; trainRender(); };
+$("trainPrev").onclick=()=>{ trainStopRec(); trainTake=0; trainI=(trainI+TRAIN_IDS.length-1)%TRAIN_IDS.length; $("trainHeard").textContent=""; trainRender(); };
+$("trainReset").onclick=()=>{ if(!confirm("Forget everything learned from your voice?")) return; userAliases={}; saveAliases(); $("trainHeard").textContent="Reset. The game uses the built-in sound-alikes only."; trainRender(); };
+$("trainRec").onclick=()=>{
+  if(!SR){ $("trainHeard").textContent="Speech recognition isn't available in this browser."; return; }
+  trainStopRec();
+  const r=new SR(); r.lang="en-US"; r.interimResults=false; r.maxAlternatives=8; r.continuous=false; addGrammar(r);
+  const id=TRAIN_IDS[trainI]; let got=false;
+  r.onresult=e=>{
+    const res=e.results[e.results.length-1]; if(!res || !res.isFinal) return; got=true;
+    const alts=[...res].map(a=>a.transcript.trim()).filter(Boolean);
+    const notes=trainLearn(id, alts);
+    $("trainHeard").innerHTML=notes.map(esc).join("<br>")||"Heard nothing usable. Try again.";
+    trainStopRec(); trainNext();
+  };
+  r.onerror=e=>{ $("trainHeard").textContent="Mic error: "+e.error+". Tap to try again."; };
+  r.onend=()=>{ $("trainRec").classList.remove("held"); if(!got && !$("trainHeard").textContent) $("trainHeard").textContent="Didn't catch that. Tap and try again."; };
+  trainRecObj=r; $("trainHeard").textContent="🎙 Listening… say: "+trainPhrase(id);
+  $("trainRec").classList.add("held");
+  try{ r.start(); }catch(_){ $("trainHeard").textContent="Couldn't start the mic. Tap again."; }
+};
 $("btnQuit").onclick=()=>{ running=false; cadStop(); stopListening("🎙 Mic off"); show("start"); $("hiStart").textContent=hiScore; };
 $("ovBtn").onclick=async()=>{ fallIn(); await resumeListening(); };   // a tap (user gesture) turns the mic back on
 $("cadToggle").onclick=()=>$("cadBar").classList.toggle("collapsed");
@@ -503,7 +560,7 @@ $("cadPlay").onclick=()=>cad.on?cadStop():cadStart();
 $("cadSel").onchange=()=>{ if(cad.on) cadStart(); else { cad.item=FormationCadences.all().find(c=>c.id===$("cadSel").value); cad.line=0; renderCad(); } };
 if(!SR) $("noSR").classList.add("on");
 if(DEBUG) $("debug").classList.add("on");
-const dbgSend=()=>{ const v=$("dbgIn").value, p=parseCommand(v); $("heardTxt").textContent=v; if(!p) return flash("NOT A VALID COMMAND","bad",v); judge(p,v,now(),true); $("dbgIn").value=""; };
+const dbgSend=()=>{ const v=$("dbgIn").value, p=parseCommand(v); $("heardTxt").textContent=v; if(!p){ $("heardTxt").textContent=v+" (ignored)"; return; } judge(p,v,now(),true); $("dbgIn").value=""; };
 $("dbgGo").onclick=dbgSend; $("dbgIn").addEventListener("keydown",e=>{ if(e.key==="Enter") dbgSend(); });
 $("hiStart").textContent=hiScore;
 $("micMode").value=micMode;
@@ -518,6 +575,7 @@ fillCadences(); buildReference();
 /* ---------- Test hook (automated tests only; not used in normal play) ---------- */
 window.FG = {
   parse:t=>{ const p=parseCommand(t); return p? p.cmd.id : null; },
+  fuzzy:(t,c)=>fuzzyParse(t,{debug:true,clarity:c}), phonKey:w=>phonKey(w), trainLearn:(id,a)=>trainLearn(id,a), aliases:()=>userAliases,
   cmd(text){ const p=parseCommand(text); if(!p) return "invalid"; judge(p,text,now(),true); return p.cmd.id; },
   /** Start a mode without mic/speech (headless): */
   startHeadless(mode){ show("game"); resize(); newGame(mode); clock.lastT=now(); clock.nextT=now()+clock.period; lastFrame=now(); },

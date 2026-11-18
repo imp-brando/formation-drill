@@ -43,7 +43,7 @@ let fails=0; const ok=(c,m)=>{ console.log((c?'PASS ':'FAIL ')+m); if(!c) fails+
  await p.evaluate(()=>window.__srs.at(-1).emit([['march',true]])); await wait(500);
  ok(!/^ACCEPTED: Rear/.test(await vd()),'stale prep not joined: '+await vd());
  // 5) maxAlternatives / grammar
- ok(await p.evaluate(()=>window.__srs.at(-1).maxAlternatives)===5,'maxAlternatives=5');
+ ok(await p.evaluate(()=>window.__srs.at(-1).maxAlternatives)>=5,'maxAlternatives>=5');
  // 6) game over stops listening + mic
  await p.click('#btnQuit'); await wait(200);
  await p.select('#micMode','both'); await p.click('button[data-mode="snake"]'); await wait(500);

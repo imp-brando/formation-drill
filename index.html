@@ -68,7 +68,8 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
 #detail{font-size:12px;color:var(--khaki);min-height:15px}
 #heard{font-size:12px;color:#e9e3d0;opacity:.85;min-height:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #heard i{color:var(--khaki)}
-#srStatus{font-size:12px;color:#e9e3d0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#heard.faint{opacity:.45}
+#srStatus{font-size:12px;color:#e9e3d0;line-height:1.25;max-height:2.5em;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 #srStatus.ok{color:#9be37f} #srStatus.warn{color:#ffd27a} #srStatus.bad{color:#ff9d8a}
 #pttBtn{flex:none;line-height:1.1;touch-action:none;user-select:none;-webkit-user-select:none}
 #pttBtn.held{background:var(--red);border-color:#ffd9d0}
@@ -109,6 +110,14 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
     <label>Unit
       <select id="unitWord"><option>Platoon</option><option>Squad</option><option>Flight</option></select>
     </label>
+    <label>Word clarity
+      <select id="clarity" title="How clearly words must be spoken. Inflection is set separately by Sensitivity.">
+        <option value="lenient" selected>Lenient (drill-sergeant slur OK)</option>
+        <option value="standard">Standard</option>
+        <option value="strict">Strict (sound-alikes must be close)</option>
+        <option value="exact">Exact words only</option>
+      </select>
+    </label>
     <label><input type="checkbox" id="tickOn" checked> Step tick</label>
     <label style="flex-basis:100%">Mic
       <select id="micMode">
@@ -122,6 +131,7 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
     <button class="primary" data-mode="snake">▶ Snake Game: tap to start (enables mic)</button>
     <button data-mode="drill">Drill Practice (open field)</button>
     <button data-mode="practice">Inflection Practice (no game)</button>
+    <button id="btnTrain">🎙 Train my voice</button>
     <button id="btnRef">Command Reference</button>
   </div>
   <div class="card" style="font-size:12px">
@@ -131,10 +141,31 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
   </div>
 </section>
 
+<!-- ================= TRAIN MY VOICE ================= -->
+<section id="train" class="screen">
+  <div class="row" style="justify-content:space-between"><h2>Train my voice</h2><button class="small" id="trainBack">Back</button></div>
+  <div class="card" style="font-size:13px">Say each command <b>twice</b>, the way you call it on the drill pad. The game saves what Chrome hears from your voice (for example "palm left march") and treats it as that command from now on. Saved on this phone only.</div>
+  <div class="card" id="trainCard" style="text-align:center">
+    <div style="font-size:12px;color:var(--khaki)" id="trainStep">Command 1 of 15 · take 1 of 2</div>
+    <div id="trainCmd" style="font-family:var(--stencil);font-size:26px;margin:6px 0">COLUMN LEFT, MARCH</div>
+    <button class="primary" id="trainRec">🎙 Tap, then say it</button>
+    <div id="trainHeard" style="font-size:12px;min-height:34px;margin-top:6px;color:#e9e3d0"></div>
+    <div class="row" style="justify-content:center;gap:8px;margin-top:4px"><button class="small" id="trainPrev">◀ Back one</button><button class="small" id="trainSkip">Skip ▶</button></div>
+  </div>
+  <div class="card" style="font-size:12px"><b>Learned so far:</b> <span id="trainCount">0</span> phrases. <button class="small" id="trainReset">Reset my voice</button><div id="trainList" style="margin-top:6px;max-height:140px;overflow:auto"></div></div>
+</section>
+
 <!-- ================= COMMAND REFERENCE ================= -->
 <section id="ref" class="screen">
   <div class="row" style="justify-content:space-between"><h2>Command Reference</h2><button class="small" id="refBack">Back</button></div>
   <div class="card" style="font-size:12px">Based on TC 3-21.5, Drill and Ceremonies. <b>Foot</b> is the foot that should be striking the ground when you call the command of execution. Squad, Platoon, and Flight are all accepted as the unit word.</div>
+  <div class="card" style="font-size:12px"><b>Getting heard on the drill pad</b><br>
+  • Hold the phone 6 to 12 inches from your mouth, and don't cover the mic.<br>
+  • Call the preparatory command crisply, pause slightly, then punch the command of execution.<br>
+  • Wind and traffic noise drown out speech: turn your back to the wind or cup the phone.<br>
+  • Clipped drill calls ("colm lef, HARCH", "fowahd, HUT", "platoon, HALT") are fine on Word clarity: Lenient.<br>
+  • If Chrome keeps hearing one command as something odd, use <b>🎙 Train my voice</b> on the start screen.<br>
+  • Talk that isn't a drill command is ignored. The status line shows <i>Heard "…" → understood as …</i> for each accepted command.</div>
   <table id="refTable"><thead><tr><th>Command</th><th>Foot</th><th>What happens</th></tr></thead><tbody></tbody></table>
 </section>
 
@@ -392,8 +423,8 @@ const CMD = Object.fromEntries(CMDS.map(c=>[c.id,c]));
 ====================================================================== */
 const EXEC_WORDS = {
   MARCH:["march","mar","marsh","marge","much","mars","harch","hutch","hut","ho","hoe","hah","huh","arch","mash","match","marched","marching","martch","mosh","hoch","harsh","mach","marches","march's","mush","marsha","mars'","mark","marc","larch","parch","starch","hush","hup","hop","harsh"],
-  HALT:["halt","hold","holt","hall","haul","alt","hault","hult","hoult","halts","holds","hawk","hot","whole","hole","haunt","holt's","halt's"],
-  FACE:["face","faith","phase","fase","fays","faced","faces","fate","fake","vase","case","base","space"],
+  HALT:["halt","hlt","hallt","salt","fault","hold","holt","hall","haul","alt","hault","hult","hoult","halts","holds","hawk","hot","whole","hole","haunt","holt's","halt's"],
+  FACE:["face","fay","fah","faith","phase","fase","fays","faced","faces","fate","fake","vase","case","base","space"],
   REST:["rest","wrest","rust","ress","rests","rested","wrist","arrest","west","rast"],
   EASE:["ease","ees","easy","eese","these","e's","is","ez","eaze","cheese"],
   DRESS:["dress","dres","drez","dressed","dresses","jess","press","chess","trust","dross"],
@@ -406,14 +437,14 @@ for(const [k,arr] of Object.entries(EXEC_WORDS)) for(const w of arr) (EXEC_LOOKU
 
 /* canonical keyword -> heard variants (single tokens) */
 const KEYWORDS = {
-  column:["column","columns","colum","collum","colm","colin","collin","colon","colonel","columbus","calm","calum","culm","kolam","colleen","coleman","column's","kollum","kolumn","volume","collar","colour","color","collins","colin's","cologne","collie","collect"],
+  column:["column","columns","palm","palms","cumm","cum","colm","clem","come","comm","kolm","colm","culm","calmer","com","kom","colum","collum","colm","colin","collin","colon","colonel","columbus","calm","calum","culm","kolam","colleen","coleman","column's","kollum","kolumn","volume","collar","colour","color","collins","colin's","cologne","collie","collect"],
   counter:["counter","encounter","counters","countered","counter's","contra","counting","county","canter","cantor","counted","countr","kounter","quarter"],
   half:["half","have","haf","hav","halves","haff","huff","hof","hath","halfe","half's","calf","hat"],
-  left:["left","lift","lef","laughed","lefts","loft","leff","lest","lyft","lept","laughs","lefty","lifts","leaf","let","lap"],
-  right:["right","write","rite","ride","wright","ryte","rights","rice","alright","bright","wright's","rye","writes","rides","fright","ripe","white"],
+  left:["left","laugh","lift","lef","laughed","lefts","loft","leff","lest","lyft","lept","laughs","lefty","lifts","leaf","let","lap"],
+  right:["right","ri","rai","righ","write","rite","ride","wright","ryte","rights","rice","alright","bright","wright's","rye","writes","rides","fright","ripe","white"],
   flank:["flank","flanks","flake","flakes","frank","franks","plank","planks","thank","thanks","flang","flanked","blank","flack","flak","flunk","flonk","flick","flex","flinch","plunk","clank","flag"],
   step:["step","steps","stop","stepped","stab","stomp","stuff","stap","stepp","stops","stem"],
-  rear:["rear","rare","rhea","reer","rehr","real","rears","rear's","rier","rearr","reared","rearing","raw","ream","reed","roar"],
+  rear:["rear","rare","reah","rea","reeah","rearh","rhea","reer","rehr","real","rears","rear's","rier","rearr","reared","rearing","raw","ream","reed","roar"],
   rearWeak:["wear","year","ear","here","hear","near","re","ree","ria","rio","rae","ray","reel","rey","ria","beer","deer","mere","clear","rhee"],
   mark:["mark","marc","marked","market","mart","marks","marques","marquee","mork","mock","marx"],
   time:["time","tim","tom","times","thyme","tine","dime","tie","timer","team","tyme","tyne","tight"],
@@ -453,7 +484,7 @@ const REWRITES = [
   [/\b(?:for|four|fore|4|far|from) (?:word|words|ward|wards|wood|world|what|wort|wed|whirred)\b/g,"forward"],
   [/\b(?:back|bach|bac) (?:ward|wards|word|words|wood|what)\b/g,"backward"],
   [/\b(?:a|uh) (?:bout|bow|but)\b/g,"about"],
-  [/\b(?:ten|10|tin|tan|ton|then|den|a ten|atten|at ten) (?:hut|hot|hat|hood|hunt|huh|hutt|but|shut)\b/g,"tenhut"],
+  [/\b(?:ten|10|tin|tan|ton|then|den|a ten|atten|at ten|tensh|tench|tens|tense|tenn|tent) (?:hut|hot|hat|hood|hunt|huh|hutt|but|shut)\b/g,"tenhut"],
   [/\btenhut\b/g,"tenhut"],
   [/\b(?:fall|falls|fault|foal) (?:in|inn|and|end|en|on)\b/g,"fallin"],
   [/\b(?:falling|fallen|fallin|follow in|for lin|fallon)\b/g,"fallin"],
@@ -470,7 +501,7 @@ function normalizeSpeech(text){
     .replace(/[‘’`]/g,"'").replace(/[^a-z0-9' ]+/g," ")
     .replace(/(\d)(?=[a-z])/g,"$1 ").replace(/\b4th\b/g,"fourth")
     .replace(/'s\b/g,"").replace(/'/g,"")
-    .replace(/\s+/g," ").trim();
+    .replace(/([a-z])\1{2,}/g,"$1").replace(/\s+/g," ").trim();
   for(const [re,rep] of REWRITES) t=t.replace(re,rep);
   return t.replace(/\s+/g," ").trim();
 }
@@ -555,7 +586,7 @@ function matchPrep(cls, tokens){
 }
 
 /** Parse a transcript into {cmd, prep} or null, using the LAST execution word heard. */
-function parseCommand(text){
+function parseExact(text){
   const t=normalizeSpeech(text);
   const tok=t.split(" ").filter(Boolean);
   if(!tok.length) return null;
@@ -574,7 +605,7 @@ function parseCommand(text){
       if(cls==="HALT"||cls==="ATTN"){
         const {canon,unit}=canonPrep(prepTok);
         const bare = canon.filter(c=>c!=="_").length===0;
-        const strict = cls==="HALT" ? ["halt","holt","hault","halts"].includes(tok[i]) : ["attention","tenshun","attenshun"].includes(tok[i]);
+        const strict = cls==="HALT" ? ["halt","holt","hault","halts","hlt","hallt"].includes(tok[i]) : ["attention","tenshun","attenshun"].includes(tok[i]);
         if(unit || ((settings.sens==="recruit"||settings.sens==="none") && bare && prepTok.length===0 && strict)) return {cmd:CMD[cls==="HALT"?"halt":"attn"], prep};
         continue;
       }
@@ -620,7 +651,7 @@ function loadSens(){
   return "recruit";
 }
 function saveSens(v){ if(SENS[v]){ localStorage.setItem("formation.sens",v); localStorage.setItem("formation.sensVer","2"); } }
-const settings = { sens:loadSens(), unit:"Platoon", tick:true };
+const settings = { sens:loadSens(), unit:"Platoon", tick:true, clarity:(["lenient","standard","strict","exact"].includes(localStorage.getItem("formation.clarity"))?localStorage.getItem("formation.clarity"):"lenient") };
 let hiScore = +localStorage.getItem("formation.hi") || 0;
 
 /* ======================================================================
@@ -831,6 +862,239 @@ function fmtVal(c){
   return `${c.unit!=="ms"&&c.key!=="pitch"&&c.got>=0?"+":""}${v}${c.unit} (need ${c.max?"≤":"≥"}${c.need})`;
 }
 function closeness(c){ if(c.got===null) return -1; const g=c.key==="pitch"?Math.abs(c.got):c.got; return c.max? c.need/Math.max(g,1) : g/Math.max(c.need,0.01); }
+
+/* ======================================================================
+   SOUND-ALIKE MATCHER (fallback when the exact parser finds nothing)
+   Drill sergeants clip and slur ("colm lef HARCH", "fowahd-harch", "haaalt").
+   1. Every heard token becomes a loose phonetic key (vowels dropped, doubled
+      and stretched letters merged, silent letters removed, ch/sh = X).
+   2. The keys of the whole utterance are joined, so run-together words
+      ("fowardharch") and split words ("call him") line up the same way.
+   3. Each command is a sequence of slots (direction / movement / execution),
+      each slot with drill-style variants. A weighted edit distance aligns the
+      END of the utterance to each command (start on a word boundary).
+      Similar sounds (t/d, m/n, k/g, p/b, f/v, s/x, l/r) are cheap; a dropped
+      ending or an extra "h" is cheap; anything else costs a full point.
+   4. Every slot must sound like its word and the whole command must score
+      above the Word clarity threshold, and clearly beat the next-best
+      different command. Talk that doesn't fit a whole prep + execution is
+      ignored.
+====================================================================== */
+const VOW="aeiouy";
+const normT = t => String(t||"").toLowerCase().replace(/[^a-z0-9' ]+/g," ").replace(/\s+/g," ").trim();
+function phonKey(w){
+  w=String(w).toLowerCase().replace(/[^a-z]/g,""); if(!w) return "";
+  w=w.replace(/(.)\1+/g,"$1")
+    .replace(/^(kn|gn|pn)/,"n").replace(/^wr/,"r").replace(/^wh/,"w").replace(/^x/,"s")
+    .replace(/mn$/,"m").replace(/mb$/,"m").replace(/alf/g,"af").replace(/(au|ou)gh/g,"$1f")
+    .replace(/igh/g,"i").replace(/gh/g,"").replace(/ph/g,"f").replace(/tch/g,"ch").replace(/ck/g,"k")
+    .replace(/sch/g,"sk").replace(/ch|sh/g,"X").replace(/th/g,"0").replace(/dg/g,"j").replace(/tion/g,"Xn")
+    .replace(/c(?=[eiy])/g,"s").replace(/[cq]/g,"k").replace(/x/g,"ks").replace(/z/g,"s");
+  let out=VOW.includes(w[0])?"A":"";
+  for(let i=0;i<w.length;i++){
+    const ch=w[i];
+    if(VOW.includes(ch)) continue;
+    if(ch==="h" && i>0) continue;                                  // h only counts at the start
+    if(ch==="w" && !VOW.includes(w[i+1]||"")) continue;            // "forwahd" ~ "foward"
+    if(ch==="r" && i>0 && VOW.includes(w[i-1]) && !VOW.includes(w[i+1]||"") && i<w.length-1 && w[i+1]!=="r") { out+="r"; continue; }   // non-rhotic r: optional (cheap)
+    out+= ch==="X"||ch==="0" ? ch : ch.toUpperCase();
+  }
+  return out.replace(/(.)\1+/g,"$1");
+}
+const SIMILAR=[["P","B",.35],["T","D",.3],["K","G",.35],["F","V",.35],["S","X",.4],["S","J",.5],["X","J",.4],["M","N",.35],["L","R",.6],["F","0",.4],["T","0",.5],["W","V",.6],["K","T",.75],["P","K",.75],["P","T",.75],["L","r",.5],["R","r",.1]];
+const SUBC={}; for(const [a,b,c] of SIMILAR){ SUBC[a+b]=c; SUBC[b+a]=c; }
+const delC=c=> c==="A"||c==="H"||c==="r" ? .3 : .7;               // template sound not heard (dropped)
+const insC=c=> c==="A"||c==="H"||c==="r" ? .3 : .85;              // extra heard sound
+const subC=(a,b)=> a===b ? 0 : (SUBC[a+b] ?? ((a==="r"||b==="r") ? .8 : 1));
+
+const V=(...ws)=>ws;
+const SL={
+  COL:V("column","colm","colum","collum","cum","comm","kolm","colin"),
+  LEFT:V("left","lef","lefft","lehf","laf","lift"),
+  RIGHT:V("right","ri","rah","rye","rai","rat","write"),
+  HALF:V("half","haf","hah","have"),
+  COUNTER:V("counter","counta","cowner","cownter"),
+  FLANK:V("flank","flan","flang","flan k"),
+  REAR:V("rear","reah","rea","rare"),
+  FORWARD:V("forward","foward","fowahd","forwah","fowah","for"),
+  MARK:V("mark","mahk","mar"), TIME:V("time","tie","tam","tah"),
+  STEP:V("step","stef","stuh","stehp"), CHANGE:V("change","chain","chay"),
+  DOUBLE:V("double","dub","dubba"), QUICK:V("quick","quih","kwik"),
+  BACKWARD:V("backward","backwa","backwah"), OPEN:V("open","ope"), CLOSE:V("close","clo","cloh"),
+  RANKS:V("ranks","rank","rahks"), EXTEND:V("extend","extin"),
+  UNIT:V("platoon","toon","plato","platun","squad","squa","flight","fligh","flai"),
+  ABOUT:V("about","bout","bow","abow"), PARADE:V("parade","prade","parah","pahrade"),
+  STAND:V("stand","stan"), AT:V("at","and","add"), DRESS:V("dress","dres"), EYES:V("eyes","eye","ah"),
+  READY:V("ready","reh","rea","reddy"), FALL:V("fall","fa","fah"),
+  // command of execution, including drill-sergeant forms
+  xMARCH:V("march","harch","arch","mar","much","mars","marsh","match","harsh","ma","hut","hup","ho","hah","hoh","huh","hoo","haa","hoch","hash","mosh"),
+  xHALT:V("halt","hault","holt","hal","hall","hold","hlt","hah","ho","hut"),
+  xATTN:V("attention","tenshun","tenshut","tenhut","shun","hut","hun"),
+  xFACE:V("face","fay","fah","hace","hay","face"), xREST:V("rest","res","hest"),
+  xEASE:V("ease","eas","ees","eeze"), xDRESS:V("dress","dres","hess","jess"),
+  xRIGHT:V("right","ri","rah","hight","hai"), xFRONT:V("front","fron","hunt","hron","frun"), xIN:V("in","en","hin","inn"),
+};
+const SLK={}; for(const [k,arr] of Object.entries(SL)) SLK[k]=[...new Set(arr.map(w=>phonKey(w.replace(/ /g,""))))].filter(Boolean);
+// [command id, slots...]; the last slot is the command of execution
+const TEMPLATES=[
+  ["colL","COL","LEFT","xMARCH"],["colL","LEFT","COL","xMARCH"],["colR","COL","RIGHT","xMARCH"],["colR","RIGHT","COL","xMARCH"],
+  ["colHL","COL","HALF","LEFT","xMARCH"],["colHL","HALF","LEFT","xMARCH"],["colHR","COL","HALF","RIGHT","xMARCH"],["colHR","HALF","RIGHT","xMARCH"],
+  ["counter","COUNTER","COL","xMARCH"],["counter","COUNTER","xMARCH"],
+  ["rflank","RIGHT","FLANK","xMARCH"],["lflank","LEFT","FLANK","xMARCH"],
+  ["rear","REAR","xMARCH"],["forward","FORWARD","xMARCH"],["mark","MARK","TIME","xMARCH"],["halfstep","HALF","STEP","xMARCH"],
+  ["change","CHANGE","STEP","xMARCH"],["double","DOUBLE","TIME","xMARCH"],["quick","QUICK","TIME","xMARCH"],
+  ["rstep","RIGHT","STEP","xMARCH"],["lstep","LEFT","STEP","xMARCH"],["back","BACKWARD","xMARCH"],
+  ["openranks","OPEN","RANKS","xMARCH"],["closeranks","CLOSE","RANKS","xMARCH"],["extend","EXTEND","xMARCH"],["close","CLOSE","xMARCH"],
+  ["halt","UNIT","xHALT"],["attn","UNIT","xATTN"],
+  ["rface","RIGHT","xFACE"],["lface","LEFT","xFACE"],["aface","ABOUT","xFACE"],["parade","PARADE","xREST"],
+  ["standease","STAND","AT","xEASE"],["dress","DRESS","RIGHT","xDRESS"],["eyes","EYES","xRIGHT"],["front","READY","xFRONT"],["fallin","FALL","xIN"],
+].map(([id,...slots])=>({id, names:slots,
+   // two-slot commands (one prep word): one-sound variants are too weak to trust
+   slots:slots.map(s=> slots.length<3 ? SLK[s].filter(k=>k.length>=2) : SLK[s])}));
+
+const PREP_VOCAB=new Set([...Object.keys(KW_LOOKUP),...Object.entries(SL).filter(([k])=>k[0]!=="x").flatMap(([,v])=>v)].filter(w=>w.length>=3));
+/* Word clarity: how far a slot may drift from its word. Lenient is the default. */
+const CLARITY={ lenient:{slot:.5, total:.7, margin:.06}, standard:{slot:.5, total:.72, margin:.08}, strict:{slot:.7, total:.86, margin:.1} };
+function loadClarity(){ const v=localStorage.getItem("formation.clarity"); return CLARITY[v]? v : "lenient"; }
+
+/* User voice aliases from "Train my voice": {cmdId: ["palm left march", ...]} */
+let userAliases={};
+try{ userAliases=JSON.parse(localStorage.getItem("formation.aliases")||"{}")||{}; }catch(_){ userAliases={}; }
+let aliasTemplates=[];
+function rebuildAliasTemplates(){
+  aliasTemplates=[];
+  for(const [id,list] of Object.entries(userAliases)) for(const ph of list||[]){
+    const toks=normT(ph).split(" ").filter(Boolean); if(toks.length<2) continue;
+    // learned prep (everything before the last word) + the normal execution word
+    const ex=TEMPLATES.find(t=>t.id===id); if(!ex) continue;
+    const pk=phonKey(toks.slice(0,-1).join("")); if(!pk) continue;
+    aliasTemplates.push({id, slots:[[pk], [...new Set([...ex.slots[ex.slots.length-1], phonKey(toks[toks.length-1])])]], names:["ALIAS",ex.names[ex.names.length-1]], alias:true});
+  }
+}
+function saveAliases(){ localStorage.setItem("formation.aliases", JSON.stringify(userAliases)); rebuildAliasTemplates(); }
+
+/* Align the end of the heard key string to one template. Returns {cost, slots:[{cost,len}]} */
+function alignTemplate(H, starts, tpl, lastStart){
+  const n=H.length, INF=1e9, B=new Set(starts.concat([n]));
+  let vec=new Array(n+1).fill(INF); for(const s of starts) vec[s]=0;
+  let hist=new Array(n+1).fill(null).map(()=>[]);
+  for(let si=0; si<tpl.slots.length; si++){
+    const variants=tpl.slots[si];
+    if(lastStart!==undefined && si===tpl.slots.length-1) for(let i=0;i<lastStart;i++) vec[i]=INF;   // execution word comes from the last word heard
+    const nv=new Array(n+1).fill(INF), nh=new Array(n+1).fill(null);
+    for(const v of variants){
+      const m=v.length;
+      let prev=vec.slice(), prevO=vec.map((_,i)=>i);
+      for(let a=1;a<=m;a++){
+        const cur=new Array(n+1).fill(INF), curO=new Array(n+1).fill(-1), vc=v[a-1];
+        cur[0]=prev[0]+delC(vc); curO[0]=prevO[0];
+        for(let i=1;i<=n;i++){
+          let best=prev[i]+delC(vc), o=prevO[i];
+          const s=prev[i-1]+subC(vc,H[i-1]); if(s<best){ best=s; o=prevO[i-1]; }
+          const ins=cur[i-1]+insC(H[i-1]); if(ins<best){ best=ins; o=curO[i-1]; }
+          cur[i]=best; curO[i]=o;
+        }
+        prev=cur; prevO=curO;
+      }
+      for(let i=0;i<=n;i++){
+        if(prev[i]>=INF || prevO[i]<0) continue;
+        const span=i-prevO[i]; if(span<1) continue;                     // every slot must be heard
+        const sc=prev[i]-vec[prevO[i]], sim=1-sc/Math.max(2,m);
+        if(m===1 && (sc>0 || span!==1)) continue;                       // one-sound variants must match exactly
+        // compare by total path cost, tie-break on the slot's similarity
+        if(prev[i]<nv[i]-1e-9 || (Math.abs(prev[i]-nv[i])<1e-9 && nh[i] && sim>nh[i][nh[i].length-1].sim)){
+          nv[i]=prev[i]; nh[i]=hist[prevO[i]].concat({cost:sc,len:Math.max(2,m),sim,from:prevO[i]});
+        }
+      }
+    }
+    // slot boundaries fall between spoken words; the execution word may also be the end of a
+    // run-together last word ("fowardharch"): at least 3 sounds of prep before it inside that word
+    if(si<tpl.slots.length-1){
+      const nextIsExec = si===tpl.slots.length-2;
+      for(let i=0;i<=n;i++) if(!B.has(i) && !(nextIsExec && lastStart!==undefined && i>=lastStart+3 && n-i>=2)) nv[i]=INF;
+      if(nextIsExec) for(let i=0;i<=n;i++) if(nh[i] && !B.has(i)) nh[i]=nh[i].map(x=>x), nh[i].merged=true;
+    }
+    vec=nv; hist=nh.map(h=>h||[]);
+  }
+  return {cost:vec[n], slots:hist[n]};
+}
+function heardKey(tokens){
+  let H="", starts=[0], lastStart=0;
+  for(const t of tokens){ const k=phonKey(t); if(!k) continue; lastStart=H.length; H+=k; starts.push(H.length); }
+  starts.pop(); return {H, starts, lastStart};
+}
+const SKIP_TAIL=new Set(["uh","um","ah","er","erm","the","a","okay","ok","now","please"]);
+/** Best sound-alike command for one transcript, or null. */
+function fuzzyParse(text, opt){
+  const clar=CLARITY[(opt&&opt.clarity)||settings.clarity||"lenient"];
+  let tok=normT(text).split(" ").filter(Boolean);
+  while(tok.length && SKIP_TAIL.has(tok[tok.length-1])) tok.pop();
+  tok=tok.slice(-7); if(!tok.length) return null;
+  tok=tok.filter(t=>!FILLER.has(t) || t==="and"); if(!tok.length) return null;          // filler words never fill a slot
+  const variants=[tok];
+  const rw=normalizeSpeech(tok.join(" ")).split(" ").filter(Boolean); if(rw.join(" ")!==tok.join(" ")) variants.push(rw);
+  // run-together prep words ("colmleft", "halfstep"): split a word whose start is a drill word
+  for(let i=0;i<tok.length;i++){
+    const w=tok[i]; if(w.length<6) continue;
+    for(let c=w.length-3;c>=3;c--) if(PREP_VOCAB.has(w.slice(0,c))){ variants.push(tok.slice(0,i).concat([w.slice(0,c),w.slice(c)],tok.slice(i+1))); break; }
+  }
+  const results=[];
+  for(const tk of variants){
+    // try the last 1..7 words as the command (start on a word boundary)
+    const {H, starts, lastStart}=heardKey(tk); if(!H) continue;
+    const tkKeys=tk.filter(t=>phonKey(t));
+    for(const tpl of TEMPLATES.concat(aliasTemplates)){
+      const r=alignTemplate(H, starts, tpl, lastStart);
+      if(!(r.cost<1e8) || r.slots.length!==tpl.slots.length) continue;
+      const len=r.slots.reduce((s,x)=>s+x.len,0), total=1-r.cost/len, minSlot=Math.min(...r.slots.map(s=>s.sim));
+      const cover=(H.length-r.slots[0].from)/H.length;
+      const startTok=starts.indexOf(r.slots[0].from);
+      const lead=startTok<0?99:tkKeys.slice(0,startTok).filter(t=>!UNIT_SET.has(t)&&!FILLER.has(t)).length;
+      results.push({id:tpl.id, total, minSlot, slots:r.slots, alias:!!tpl.alias, names:tpl.names, cover, rank: total+0.2*cover, lead, merged:!!(r.slots.merged)});
+    }
+  }
+  if(!results.length) return null;
+  results.sort((a,b)=>b.rank-a.rank);
+  const best=results[0];
+  if(opt&&opt.debug) return results.slice(0,3).map(r=>[r.id,+r.total.toFixed(2),+r.rank.toFixed(2),r.slots.map(x=>+x.sim.toFixed(2))]);
+  if(best.total<clar.total || best.minSlot<clar.slot) return null;
+  // execution slot must sound like an execution word (guards against stray words)
+  const ex=best.slots[best.slots.length-1].sim;
+  if(ex<Math.max(clar.slot,.6)) return null;
+  if(best.slots.length<3 && !best.alias){
+    // one prep word + execution: must be clean and must be the whole thing said (after a unit word / filler)
+    if(best.minSlot<Math.max(.7,clar.slot) || ex<.8 || best.total<Math.max(.85,clar.total) || best.lead>0) return null;
+  }
+  const rival=results.find(r=>r.id!==best.id);
+  if(rival && best.rank-rival.rank<clar.margin && !best.alias) return null;   // too close to call: ignore
+  return {cmd:CMD[best.id], prep:"", score:+best.total.toFixed(2), via:best.alias?"your voice":"sound-alike", rival:rival&&rival.id, rivalScore:rival&&+rival.total.toFixed(2)};
+}
+/** Sound-alike prep with no execution word yet ("palm left" … pause … "harch"). Stricter. */
+function fuzzyPrepOnly(text){
+  const tok=normT(text).split(" ").filter(Boolean).slice(-5); if(!tok.length) return null;
+  const {H,starts}=heardKey(tok); if(!H) return null;
+  let best=null, second=null;
+  for(const tpl of TEMPLATES){
+    if(tpl.names[tpl.names.length-1]!=="xMARCH" || tpl.slots.length<3) continue;   // only multi-word movement preps
+    const r=alignTemplate(H, starts, {slots:tpl.slots.slice(0,-1)});
+    if(!(r.cost<1e8)) continue;
+    const len=r.slots.reduce((s,x)=>s+x.len,0), total=1-r.cost/len, minSlot=Math.min(...r.slots.map(s=>s.sim));
+    const e={id:tpl.id,total,minSlot};
+    if(!best||total>best.total){ if(best&&best.id!==e.id) second=best; best=e; } else if(e.id!==best.id && (!second||total>second.total)) second=e;
+  }
+  if(!best || best.total<.78 || best.minSlot<.55 || (second && best.total-second.total<.1)) return null;
+  return CMD[best.id];
+}
+
+rebuildAliasTemplates();
+/** Exact parser first; sound-alike matcher second. Learned phrases from "Train my voice" count exactly. */
+function parseCommand(text){
+  const n=normT(text);
+  for(const [id,list] of Object.entries(userAliases)) for(const ph of list||[]){ const a=normT(ph); if(a && (n===a || n.endsWith(" "+a))) return {cmd:CMD[id], prep:"", score:1, via:"your voice"}; }
+  const p=parseExact(text); if(p) return Object.assign(p,{score:1, via:"exact"});
+  if(settings.clarity==="exact") return null;
+  return fuzzyParse(text);
+}
 
 /* ======================================================================
    BEAT CLOCK: beat k is the moment foot(k) strikes the ground. Even = LEFT.
@@ -1406,7 +1670,8 @@ let micMode = ["auto","rec","both"].includes(localStorage.getItem("formation.mic
 let coexist = localStorage.getItem("formation.coexist");   // "yes" | "no" | null (untested)
 let meterOffReason = "", pendingProbe=false, probe=null;
 const normText = t => t.toLowerCase().replace(/[^a-z0-9' ]+/g," ").replace(/\s+/g," ").trim();
-function setStatus(txt, cls){ const el=$("srStatus"); if(el){ el.textContent=txt; el.className=cls||""; } }
+let statusHoldUntil=0;   // keep "Heard … → understood as …" readable across Android's constant session restarts
+function setStatus(txt, cls, hold){ const el=$("srStatus"); if(!el) return; if(!hold && now()<statusHoldUntil && cls==="ok") return; el.textContent=txt; el.className=cls||""; statusHoldUntil = hold ? now()+hold : 0; }
 
 /* Grammar hint: Chrome mostly ignores it, but it's harmless and helps engines that use it. */
 const GRAMMAR_PHRASES=["column right march","column left march","column half right march","column half left march","counter column march","rear march","right flank march","left flank march","forward march","mark time march","half step march","change step march","double time march","quick time march","right step march","left step march","backward march","open ranks march","close ranks march","extend march","close march","platoon halt","platoon attention","right face","left face","about face","parade rest","stand at ease","at ease","dress right dress","eyes right","ready front","fall in"];
@@ -1419,7 +1684,7 @@ function addGrammar(r){
 }
 function makeRec(){
   const r=new SR();
-  r.lang="en-US"; r.interimResults=true; r.maxAlternatives=5;
+  r.lang="en-US"; r.interimResults=true; r.maxAlternatives=8;
   // Android: short sessions restarted immediately are the most reliable. Hold-to-talk stays open
   // until release, so a pause before the execution word can't end it.
   r.continuous = ptt || !IS_ANDROID;
@@ -1474,34 +1739,36 @@ function handleResult(e){
   let triggerProbe=false;
   for(let i=e.resultIndex;i<e.results.length;i++){
     const res=e.results[i], key=session+":"+i, top=res[0].transcript.trim();
-    $("heardTxt").textContent=top;
+    $("heardTxt").textContent=top; $("heard").className="";
     if(ttsBusy || now()<ttsQuietSince){ $("heardTxt").textContent="(ignored: cadence voice) "+top; continue; } // never obey our own TTS
     let hit=null, firstFresh=null;
     const pend = pendingPrep && now()-pendingPrep.t<PREP_WAIT_MS ? pendingPrep.text : null;
-    // try every alternative Chrome offers, first alone, then joined to a prep heard just before
+    // score every alternative Chrome offers (alone, then joined to a prep heard just before); keep the best
     for(let pass=0; pass<2 && !hit; pass++){
       if(pass===1 && !pend) break;
-      for(let a=0;a<res.length && !hit;a++){
+      for(let a=0;a<res.length;a++){
         const n=normText(res[a].transcript), fresh=freshPart(key,n);
         if(firstFresh===null) firstFresh=fresh;
         if(!fresh) continue;
         const p=parseCommand(pass===0? fresh : pend+" "+fresh);
-        if(p) hit={p, raw:(pass===0?"":pend+" … ")+res[a].transcript.trim(), n};
+        if(p && (!hit || p.score>hit.p.score+1e-9)) hit={p, raw:(pass===0?"":pend+" … ")+res[a].transcript.trim(), n};
       }
     }
     if(hit){
       consumedText.set(key, hit.n); sessionText=hit.n; pendingPrep=null;
-      setStatus(`Heard "${hit.raw}" → ${hit.p.cmd.name}`, "ok");
+      $("heardTxt").textContent=hit.raw; $("heard").className="";
+      const how = hit.p.via==="sound-alike" ? " (sound-alike)" : hit.p.via==="your voice" ? " (your voice)" : "";
+      setStatus(`Heard "${hit.raw}" → understood as ${hit.p.cmd.name.toUpperCase()}${how}`, "ok", 4000);
       onCommandHeard(hit.p, hit.raw); triggerProbe=true;
     } else if(res.isFinal && firstFresh){
       triggerProbe=true;
-      const prep=parsePrepOnly(firstFresh);
+      const prep=parsePrepOnly(firstFresh) || (settings.clarity!=="exact" && fuzzyPrepOnly(firstFresh));
       if(prep){
         pendingPrep={text:firstFresh, t:now()}; picaaPrep();
-        setStatus(`Heard "${top}" → ${prep.name.split(",")[0]}… waiting for ${prep.exec}`, "ok");
+        setStatus(`Heard "${top}" → understood as ${prep.name.split(",")[0].toUpperCase()}… waiting for ${prep.exec}`, "ok", 3500);
       } else {
-        setStatus(`Heard "${top}": not a drill command`, "warn");
-        if(hasExecWord(firstFresh)) flash("NOT A VALID COMMAND","bad","Heard: "+top);
+        // not a drill command: discard quietly (no flash, no penalty)
+        $("heard").className="faint"; $("heardTxt").textContent=top+" (ignored)";
       }
       consumedText.set(key, normText(res[0].transcript));
     }
@@ -1768,6 +2035,60 @@ async function begin(mode){
 /* ---------- Wire up the UI ---------- */
 document.querySelectorAll("[data-mode]").forEach(b=>b.addEventListener("click",()=>begin(b.dataset.mode)));
 $("btnRef").onclick=()=>show("ref"); $("refBack").onclick=()=>show("start");
+$("clarity").value=settings.clarity;
+$("clarity").addEventListener("change",()=>{ settings.clarity=$("clarity").value; localStorage.setItem("formation.clarity",settings.clarity); });
+
+/* ---------- Train my voice: say each core command twice; keep what Chrome hears as personal aliases ---------- */
+const TRAIN_IDS=["forward","halt","colL","colR","colHL","colHR","lflank","rflank","rear","counter","mark","halfstep","change","double","quick"];
+const trainPhrase=id=> id==="halt" ? settings.unit.toUpperCase()+", HALT" : CMD[id].name.toUpperCase();
+let trainI=0, trainTake=0, trainRecObj=null;
+function trainRender(){
+  $("trainStep").textContent=`Command ${trainI+1} of ${TRAIN_IDS.length} · take ${trainTake+1} of 2`;
+  $("trainCmd").textContent=trainPhrase(TRAIN_IDS[trainI]);
+  const all=Object.entries(userAliases).flatMap(([id,l])=>(l||[]).map(ph=>[id,ph]));
+  $("trainCount").textContent=all.length;
+  $("trainList").innerHTML=all.map(([id,ph])=>`"${esc(ph)}" → ${esc(CMD[id].name)}`).join("<br>")||"<i>Nothing yet.</i>";
+}
+function trainStopRec(){ try{ if(trainRecObj){ trainRecObj.onresult=null; trainRecObj.onend=null; trainRecObj.abort(); } }catch(_){} trainRecObj=null; $("trainRec").classList.remove("held"); }
+/** Store what Chrome heard for this command. Skips guesses that are already another command. Returns notes for display. */
+function trainLearn(id, transcripts){
+  const notes=[]; const list=userAliases[id]||(userAliases[id]=[]);
+  for(const raw of transcripts){
+    const n=normText(raw); if(!n || n.split(" ").length<2) continue;
+    const ex=parseExact(n), fz=ex?null:fuzzyParse(n);
+    const got=(ex||fz)&&(ex||fz).cmd.id;
+    if(got===id){ notes.push(`"${raw}" ✓ already understood`); continue; }
+    if(got && got!==id){ notes.push(`"${raw}" skipped (sounds like ${CMD[got].name})`); continue; }
+    if(!list.includes(n)){ list.push(n); notes.push(`"${raw}" → saved`); }
+  }
+  if(list.length>12) list.splice(0,list.length-12);
+  if(!list.length) delete userAliases[id];
+  saveAliases(); return notes;
+}
+function trainNext(){ trainTake++; if(trainTake>=2){ trainTake=0; trainI=Math.min(TRAIN_IDS.length-1,trainI+1); if(trainI===TRAIN_IDS.length-1 && trainTake===0){} } trainRender(); }
+$("btnTrain").onclick=()=>{ if(recOn) stopListening(); trainI=0; trainTake=0; $("trainHeard").textContent=""; trainRender(); show("train"); };
+$("trainBack").onclick=()=>{ trainStopRec(); show("start"); };
+$("trainSkip").onclick=()=>{ trainStopRec(); trainTake=0; trainI=(trainI+1)%TRAIN_IDS.length; $("trainHeard").textContent=""; trainRender(); };
+$("trainPrev").onclick=()=>{ trainStopRec(); trainTake=0; trainI=(trainI+TRAIN_IDS.length-1)%TRAIN_IDS.length; $("trainHeard").textContent=""; trainRender(); };
+$("trainReset").onclick=()=>{ if(!confirm("Forget everything learned from your voice?")) return; userAliases={}; saveAliases(); $("trainHeard").textContent="Reset. The game uses the built-in sound-alikes only."; trainRender(); };
+$("trainRec").onclick=()=>{
+  if(!SR){ $("trainHeard").textContent="Speech recognition isn't available in this browser."; return; }
+  trainStopRec();
+  const r=new SR(); r.lang="en-US"; r.interimResults=false; r.maxAlternatives=8; r.continuous=false; addGrammar(r);
+  const id=TRAIN_IDS[trainI]; let got=false;
+  r.onresult=e=>{
+    const res=e.results[e.results.length-1]; if(!res || !res.isFinal) return; got=true;
+    const alts=[...res].map(a=>a.transcript.trim()).filter(Boolean);
+    const notes=trainLearn(id, alts);
+    $("trainHeard").innerHTML=notes.map(esc).join("<br>")||"Heard nothing usable. Try again.";
+    trainStopRec(); trainNext();
+  };
+  r.onerror=e=>{ $("trainHeard").textContent="Mic error: "+e.error+". Tap to try again."; };
+  r.onend=()=>{ $("trainRec").classList.remove("held"); if(!got && !$("trainHeard").textContent) $("trainHeard").textContent="Didn't catch that. Tap and try again."; };
+  trainRecObj=r; $("trainHeard").textContent="🎙 Listening… say: "+trainPhrase(id);
+  $("trainRec").classList.add("held");
+  try{ r.start(); }catch(_){ $("trainHeard").textContent="Couldn't start the mic. Tap again."; }
+};
 $("btnQuit").onclick=()=>{ running=false; cadStop(); stopListening("🎙 Mic off"); show("start"); $("hiStart").textContent=hiScore; };
 $("ovBtn").onclick=async()=>{ fallIn(); await resumeListening(); };   // a tap (user gesture) turns the mic back on
 $("cadToggle").onclick=()=>$("cadBar").classList.toggle("collapsed");
@@ -1775,7 +2096,7 @@ $("cadPlay").onclick=()=>cad.on?cadStop():cadStart();
 $("cadSel").onchange=()=>{ if(cad.on) cadStart(); else { cad.item=FormationCadences.all().find(c=>c.id===$("cadSel").value); cad.line=0; renderCad(); } };
 if(!SR) $("noSR").classList.add("on");
 if(DEBUG) $("debug").classList.add("on");
-const dbgSend=()=>{ const v=$("dbgIn").value, p=parseCommand(v); $("heardTxt").textContent=v; if(!p) return flash("NOT A VALID COMMAND","bad",v); judge(p,v,now(),true); $("dbgIn").value=""; };
+const dbgSend=()=>{ const v=$("dbgIn").value, p=parseCommand(v); $("heardTxt").textContent=v; if(!p){ $("heardTxt").textContent=v+" (ignored)"; return; } judge(p,v,now(),true); $("dbgIn").value=""; };
 $("dbgGo").onclick=dbgSend; $("dbgIn").addEventListener("keydown",e=>{ if(e.key==="Enter") dbgSend(); });
 $("hiStart").textContent=hiScore;
 $("micMode").value=micMode;
@@ -1790,6 +2111,7 @@ fillCadences(); buildReference();
 /* ---------- Test hook (automated tests only; not used in normal play) ---------- */
 window.FG = {
   parse:t=>{ const p=parseCommand(t); return p? p.cmd.id : null; },
+  fuzzy:(t,c)=>fuzzyParse(t,{debug:true,clarity:c}), phonKey:w=>phonKey(w), trainLearn:(id,a)=>trainLearn(id,a), aliases:()=>userAliases,
   cmd(text){ const p=parseCommand(text); if(!p) return "invalid"; judge(p,text,now(),true); return p.cmd.id; },
   /** Start a mode without mic/speech (headless): */
   startHeadless(mode){ show("game"); resize(); newGame(mode); clock.lastT=now(); clock.nextT=now()+clock.period; lastFrame=now(); },

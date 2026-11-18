@@ -133,8 +133,8 @@ const CMD = Object.fromEntries(CMDS.map(c=>[c.id,c]));
 ====================================================================== */
 const EXEC_WORDS = {
   MARCH:["march","mar","marsh","marge","much","mars","harch","hutch","hut","ho","hoe","hah","huh","arch","mash","match","marched","marching","martch","mosh","hoch","harsh","mach","marches","march's","mush","marsha","mars'","mark","marc","larch","parch","starch","hush","hup","hop","harsh"],
-  HALT:["halt","hold","holt","hall","haul","alt","hault","hult","hoult","halts","holds","hawk","hot","whole","hole","haunt","holt's","halt's"],
-  FACE:["face","faith","phase","fase","fays","faced","faces","fate","fake","vase","case","base","space"],
+  HALT:["halt","hlt","hallt","salt","fault","hold","holt","hall","haul","alt","hault","hult","hoult","halts","holds","hawk","hot","whole","hole","haunt","holt's","halt's"],
+  FACE:["face","fay","fah","faith","phase","fase","fays","faced","faces","fate","fake","vase","case","base","space"],
   REST:["rest","wrest","rust","ress","rests","rested","wrist","arrest","west","rast"],
   EASE:["ease","ees","easy","eese","these","e's","is","ez","eaze","cheese"],
   DRESS:["dress","dres","drez","dressed","dresses","jess","press","chess","trust","dross"],
@@ -147,14 +147,14 @@ for(const [k,arr] of Object.entries(EXEC_WORDS)) for(const w of arr) (EXEC_LOOKU
 
 /* canonical keyword -> heard variants (single tokens) */
 const KEYWORDS = {
-  column:["column","columns","colum","collum","colm","colin","collin","colon","colonel","columbus","calm","calum","culm","kolam","colleen","coleman","column's","kollum","kolumn","volume","collar","colour","color","collins","colin's","cologne","collie","collect"],
+  column:["column","columns","palm","palms","cumm","cum","colm","clem","come","comm","kolm","colm","culm","calmer","com","kom","colum","collum","colm","colin","collin","colon","colonel","columbus","calm","calum","culm","kolam","colleen","coleman","column's","kollum","kolumn","volume","collar","colour","color","collins","colin's","cologne","collie","collect"],
   counter:["counter","encounter","counters","countered","counter's","contra","counting","county","canter","cantor","counted","countr","kounter","quarter"],
   half:["half","have","haf","hav","halves","haff","huff","hof","hath","halfe","half's","calf","hat"],
-  left:["left","lift","lef","laughed","lefts","loft","leff","lest","lyft","lept","laughs","lefty","lifts","leaf","let","lap"],
-  right:["right","write","rite","ride","wright","ryte","rights","rice","alright","bright","wright's","rye","writes","rides","fright","ripe","white"],
+  left:["left","laugh","lift","lef","laughed","lefts","loft","leff","lest","lyft","lept","laughs","lefty","lifts","leaf","let","lap"],
+  right:["right","ri","rai","righ","write","rite","ride","wright","ryte","rights","rice","alright","bright","wright's","rye","writes","rides","fright","ripe","white"],
   flank:["flank","flanks","flake","flakes","frank","franks","plank","planks","thank","thanks","flang","flanked","blank","flack","flak","flunk","flonk","flick","flex","flinch","plunk","clank","flag"],
   step:["step","steps","stop","stepped","stab","stomp","stuff","stap","stepp","stops","stem"],
-  rear:["rear","rare","rhea","reer","rehr","real","rears","rear's","rier","rearr","reared","rearing","raw","ream","reed","roar"],
+  rear:["rear","rare","reah","rea","reeah","rearh","rhea","reer","rehr","real","rears","rear's","rier","rearr","reared","rearing","raw","ream","reed","roar"],
   rearWeak:["wear","year","ear","here","hear","near","re","ree","ria","rio","rae","ray","reel","rey","ria","beer","deer","mere","clear","rhee"],
   mark:["mark","marc","marked","market","mart","marks","marques","marquee","mork","mock","marx"],
   time:["time","tim","tom","times","thyme","tine","dime","tie","timer","team","tyme","tyne","tight"],
@@ -194,7 +194,7 @@ const REWRITES = [
   [/\b(?:for|four|fore|4|far|from) (?:word|words|ward|wards|wood|world|what|wort|wed|whirred)\b/g,"forward"],
   [/\b(?:back|bach|bac) (?:ward|wards|word|words|wood|what)\b/g,"backward"],
   [/\b(?:a|uh) (?:bout|bow|but)\b/g,"about"],
-  [/\b(?:ten|10|tin|tan|ton|then|den|a ten|atten|at ten) (?:hut|hot|hat|hood|hunt|huh|hutt|but|shut)\b/g,"tenhut"],
+  [/\b(?:ten|10|tin|tan|ton|then|den|a ten|atten|at ten|tensh|tench|tens|tense|tenn|tent) (?:hut|hot|hat|hood|hunt|huh|hutt|but|shut)\b/g,"tenhut"],
   [/\btenhut\b/g,"tenhut"],
   [/\b(?:fall|falls|fault|foal) (?:in|inn|and|end|en|on)\b/g,"fallin"],
   [/\b(?:falling|fallen|fallin|follow in|for lin|fallon)\b/g,"fallin"],
@@ -211,7 +211,7 @@ function normalizeSpeech(text){
     .replace(/[‘’`]/g,"'").replace(/[^a-z0-9' ]+/g," ")
     .replace(/(\d)(?=[a-z])/g,"$1 ").replace(/\b4th\b/g,"fourth")
     .replace(/'s\b/g,"").replace(/'/g,"")
-    .replace(/\s+/g," ").trim();
+    .replace(/([a-z])\1{2,}/g,"$1").replace(/\s+/g," ").trim();
   for(const [re,rep] of REWRITES) t=t.replace(re,rep);
   return t.replace(/\s+/g," ").trim();
 }
@@ -296,7 +296,7 @@ function matchPrep(cls, tokens){
 }
 
 /** Parse a transcript into {cmd, prep} or null, using the LAST execution word heard. */
-function parseCommand(text){
+function parseExact(text){
   const t=normalizeSpeech(text);
   const tok=t.split(" ").filter(Boolean);
   if(!tok.length) return null;
@@ -315,7 +315,7 @@ function parseCommand(text){
       if(cls==="HALT"||cls==="ATTN"){
         const {canon,unit}=canonPrep(prepTok);
         const bare = canon.filter(c=>c!=="_").length===0;
-        const strict = cls==="HALT" ? ["halt","holt","hault","halts"].includes(tok[i]) : ["attention","tenshun","attenshun"].includes(tok[i]);
+        const strict = cls==="HALT" ? ["halt","holt","hault","halts","hlt","hallt"].includes(tok[i]) : ["attention","tenshun","attenshun"].includes(tok[i]);
         if(unit || ((settings.sens==="recruit"||settings.sens==="none") && bare && prepTok.length===0 && strict)) return {cmd:CMD[cls==="HALT"?"halt":"attn"], prep};
         continue;
       }
@@ -361,7 +361,7 @@ function loadSens(){
   return "recruit";
 }
 function saveSens(v){ if(SENS[v]){ localStorage.setItem("formation.sens",v); localStorage.setItem("formation.sensVer","2"); } }
-const settings = { sens:loadSens(), unit:"Platoon", tick:true };
+const settings = { sens:loadSens(), unit:"Platoon", tick:true, clarity:(["lenient","standard","strict","exact"].includes(localStorage.getItem("formation.clarity"))?localStorage.getItem("formation.clarity"):"lenient") };
 let hiScore = +localStorage.getItem("formation.hi") || 0;
 
 /* ======================================================================

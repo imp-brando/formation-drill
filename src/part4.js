@@ -11,7 +11,15 @@ function footAtTime(t){ const k=clock.k-1+Math.round((t-clock.lastT)/clock.perio
 /* ======================================================================
    GAME STATE
 ====================================================================== */
-const SNAKE_W=14, SNAKE_H=21;   // parade field in steps (1 unit = one 30-inch step)
+let SNAKE_W=28, SNAKE_H=42;     // parade field in steps (1 unit = one 30-inch step); sized to the screen in newGame
+const MIN_CELL_PX=12.5;         // smallest on-screen step (CSS px) at which legs still read clearly
+/** Fit as many steps as the field area allows (about 28 x 42 on a phone), keeping soldiers recognisable. */
+function pickSnakeField(){
+  const r=cv.getBoundingClientRect(); let w=r.width, h=r.height;
+  if(w<50||h<50){ w=390; h=590; }
+  const cell=Math.max(MIN_CELL_PX, Math.min(w, h*2/3)/28);
+  SNAKE_W=clamp(Math.floor(w/cell),20,44); SNAKE_H=clamp(Math.floor(h/cell),30,66);
+}
 let G=null;      // current game
 let F=null;      // formation: {W, rankDist, interval, path, ranks:[{s, sol:[soldier|null per file]}], mode, cc}
 let soldierId=0;
@@ -30,19 +38,19 @@ function allSoldiers(){ const out=[]; for(const rk of F.ranks) for(const s of rk
 
 function newGame(mode){
   G = { mode, score:0, recruits:[], over:false, move:"halt", tempo:"quick", posture:"attention",
-        dress:false, eyes:false, sched:[], hitch:false, busy:null, prevMove:"forward", bpmBase: mode==="snake"?96:120 };
+        dress:false, eyes:false, sched:[], hitch:false, busy:null, prevMove:"forward", bpmBase: mode==="snake"?112:120 };
   soldierId=0;
-  if(mode==="snake"){ F=makeFormation(SNAKE_W/2, SNAKE_H-4, 0, 4, 8); }
+  if(mode==="snake"){ pickSnakeField(); F=makeFormation(SNAKE_W/2, SNAKE_H-5, 0, 4, 8); }
   else F=makeFormation(0,0,0,4, mode==="drill"?16:4);
   layoutSoldiers(0,true);
-  if(mode==="snake") spawnRecruit();
+  if(mode==="snake"){ spawnRecruit(); spawnRecruit(); }   // two recruits out at once on the big field
   cam.x=0; cam.y=0;
   $("overlay").classList.remove("on");
   updateHUD(); setStateTag();
 }
 function bpm(){
   if(G.tempo==="double") return 180;
-  return G.mode==="snake" ? Math.min(132, G.bpmBase+2*G.score/10) : G.bpmBase;
+  return G.mode==="snake" ? Math.min(144, G.bpmBase+2*G.score/10) : G.bpmBase;
 }
 
 /* ---------- Scheduling: run fn at beat index k ---------- */
@@ -77,39 +85,44 @@ function canExecute(c){
 }
 
 function execute(c){
+  if(window.__execLog) window.__execLog.push({id:c.id, t:now(), k:curBeat});   // test hook
   const k=curBeat, halted=G.move==="halt", stride=strideNow();
   switch(c.id){
     case "forward":
       if(halted){ realignForStepOff(); G.move="forward"; }
-      else at(k+1,()=>{ G.move="forward"; });
+      else G.move="forward";
       break;
     case "halt":
-      at(k+1,()=>{ G.move="closing"; });                 // one more step…
-      at(k+2,()=>{ G.move="halt"; G.tempo="quick"; });    // …then the trailing foot comes alongside
+      // The "one more step" is the step taken while the command was being recognised, so the
+      // halting step starts on this beat and the trailing foot comes alongside on the next.
+      G.move="closing";
+      at(k+1,()=>{ G.move="halt"; G.tempo="quick"; });
       break;
-    case "mark": if(halted){ realignForStepOff(); G.move="mark"; } else at(k+1,()=>{ G.move="mark"; }); break;
-    case "halfstep": at(k+1,()=>{ G.move="half"; }); break;
+    case "mark": if(halted){ realignForStepOff(); G.move="mark"; } else G.move="mark"; break;
+    case "halfstep": G.move="half"; break;
     case "double":
       if(halted){ realignForStepOff(); G.move="forward"; G.tempo="double"; }
-      else at(k+1,()=>{ G.tempo="double"; if(G.move==="half") G.move="forward"; });
+      else { G.tempo="double"; if(G.move==="half") G.move="forward"; }
       break;
-    case "quick": at(k+1,()=>{ G.tempo="quick"; }); break;
-    case "change": G.busy="change step"; at(k+1,()=>{ G.hitch=true; }); at(k+2,()=>{ G.hitch=false; G.busy=null; }); break;
+    case "quick": G.tempo="quick"; break;
+    case "change": G.busy="change step"; G.hitch=true; at(k+1,()=>{ G.hitch=false; G.busy=null; }); break;
     case "colR": case "colL": case "colHR": case "colHL": {
       const d = (c.id==="colR"||c.id==="colHR")? 1 : -1, ang=(c.id.startsWith("colH")?45:90)*D2R;
-      const half=(F.W-1)/2*F.interval, inner=1.0*F.interval, R=half+inner, Rout=R+half;   // pivot file wheels on a 1-step radius at 1/4 step
-      const arc={t:"A",ang,r:R,d,f:R/Rout};   // f: outside file keeps a full step, pivot file half-steps
+      const half=(F.W-1)/2*F.interval, inner=1.5*F.interval, R=half+inner, Rout=R+half;   // pivot file wheels on a 1.5-step radius at 0.4 step
+      // f: the outside file, which has the farthest to go, lengthens its stride to 1.2 steps (still one
+      // step per beat) while the pivot file takes short steps; every rank does the same at the same spot.
+      const arc={t:"A",ang,r:R,d,f:CATCHUP_WHEEL*R/Rout};
       if(halted||G.move==="mark"){ realignForStepOff(); G.move="forward"; F.path.append(F.ranks[0].s, [arc]); }
-      else { if(G.move==="half") G.move="forward"; F.path.append(F.ranks[0].s+stride, [arc]); } // one more step, then pivot
+      else { if(G.move==="half") G.move="forward"; F.path.append(F.ranks[0].s, [arc]); } // pivot on this beat (the one more step was taken while the command was recognised)
       break; }
     case "rflank": case "lflank":
       G.busy="flank";
-      at(k+1,()=>{ flankTransform(c.id==="rflank"?1:-1); G.busy=null; });
+      flankTransform(c.id==="rflank"?1:-1); G.busy=null;
       break;
     case "rear":
       G.busy="rear march";
-      at(k+1,()=>{ G.prevMove = G.move==="half"?"half":"forward"; G.move="pivot"; rearTransform(); }); // pivot on the balls of both feet
-      at(k+2,()=>{ G.move=G.prevMove; G.busy=null; });                                             // step off with the left foot
+      G.prevMove = G.move==="half"?"half":"forward"; G.move="pivot"; rearTransform();   // pivot on the balls of both feet
+      at(k+1,()=>{ G.move=G.prevMove; G.busy=null; });                                             // step off with the left foot
       break;
     case "counter": if(halted){ realignForStepOff(); G.move="forward"; } else if(G.move!=="forward") G.move="forward"; startCounterColumn(); break;
     case "rstep": case "lstep": case "back": realignForStepOff(); G.move=c.id; break;
@@ -211,11 +224,14 @@ function startCounterColumn(){
   F.cc={paths, headS, endS, depths};
   F.mode="counter";
 }
+const CATCHUP_WHEEL=1.2, CATCHUP_MAX=1.25;   // longest catch-up stride, in 30-inch steps (same cadence)
 function advanceCounter(dist){
-  const cc=F.cc, done=cc.headS.map((h,sq)=>h-cc.endS[sq]), minD=Math.min(...done);
+  const cc=F.cc, done=cc.headS.map((h,sq)=>h-cc.endS[sq]), minD=Math.min(...done), maxD=Math.max(...done);
   for(let sq=0;sq<4;sq++){
-    // squads that have completed both turns take half steps until the others are abreast
-    const k = (done[sq]>=0 && done[sq]>minD+0.04) ? 0.5 : 1;
+    // squads that have completed both turns take half steps until the others are abreast;
+    // squads that are behind lengthen their stride (up to 1.25 steps, same cadence) to catch up
+    const lag=maxD-done[sq];
+    const k = (done[sq]>=0 && done[sq]>minD+0.04) ? 0.5 : lag>0.04 ? Math.min(CATCHUP_MAX, 1+lag) : 1;
     cc.headS[sq]+=dist*k;
   }
   const maxDepth=cc.depths[cc.depths.length-1];
@@ -254,7 +270,7 @@ function advance(dtBeats){
   for(let r=1;r<F.ranks.length;r++){
     const rk=F.ranks[r], prev=F.ranks[r-1], f=F.path.factorAt(rk.s), gap=prev.s-rk.s;
     let ds=dist*f;
-    if(f===1 && gap>F.rankDist+0.01) ds=Math.min(ds*1.25, gap-F.rankDist+ds);   // cover down if a rank fell behind
+    if(f===1 && gap>F.rankDist+0.01) ds=Math.min(ds*CATCHUP_MAX, gap-F.rankDist+ds);   // cover down: longer strides, same cadence
     let target=Math.min(rk.s+ds, prev.s-0.3*F.rankDist);
     if(!rankClear(r,target)){ const half=rk.s+ds*.5; target = rankClear(r,half)? half : rk.s; }
     rk.s=Math.max(rk.s,target);
@@ -268,7 +284,7 @@ function slotPos(sq,s){
 function rankClear(r,s){
   // Safety only: a soldier must never walk into the one directly ahead in the same file.
   // (At the pivot point the pivot files briefly close up, as in real drill; that's allowed.)
-  const a=F.ranks[r], b=F.ranks[r-1], lim=0.2*Math.min(F.rankDist,1);
+  const a=F.ranks[r], b=F.ranks[r-1], lim=0.4*Math.min(F.rankDist,1);
   for(let sq=0;sq<F.W;sq++){
     if(!a.sol[sq] || !b.sol[sq]) continue;
     const pa=slotPos(sq,s), pb=slotPos(sq,b.s);

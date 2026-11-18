@@ -15,7 +15,7 @@ function computeView(){
   if(G.mode==="snake"){ const sc=Math.min(W/SNAKE_W, H/SNAKE_H); view={scale:sc, ox:(W-SNAKE_W*sc)/2, oy:(H-SNAKE_H*sc)/2}; return; }
   const sol=allSoldiers(); let cx=0,cy=0; sol.forEach(s=>{cx+=s.x;cy+=s.y;}); cx/=sol.length||1; cy/=sol.length||1;
   cam.x=lerp(cam.x,cx,.08); cam.y=lerp(cam.y,cy,.08);
-  const sc=Math.min(W,H)/(G.mode==="practice"? 6 : 10);
+  const sc=Math.min(W,H)/(G.mode==="practice"? 7 : 16);   // zoomed out: about 16 steps across a phone
   view={scale:sc, ox:W/2-cam.x*sc, oy:H/2-cam.y*sc};
 }
 function draw(phase){
@@ -53,7 +53,7 @@ function drawSoldier(s, phase, sq){
   const halted = G.move==="halt" && F.mode!=="counter";
   const inPlace = !halted && marching() && amp<0.2;            // mark time, pivot, closing, waiting rank
   const rightFile = sq===F.W-1;
-  const k = G.mode==="snake" ? 1.2 : 1;                      // slightly larger sprites on the small snake field
+  const k = G.mode==="snake" ? 1.3 : 1.15;                   // sprites scaled up within the step so legs stay readable
   ctx.save(); ctx.translate(s.x,s.y); ctx.scale(k,k);
   drawBody(0,0,s.face, halted?0:amp, phase, "#3e4a1c","#151905", {
     posture:halted?G.posture:"attention", dress:G.dress && !rightFile, eyes:(G.eyes||G.dress) && !(marching() && rightFile && G.eyes) && !(G.dress && rightFile),
@@ -72,14 +72,14 @@ function drawBody(x,y,h,amp,phase,fill,stroke,opt){
   for(const [lat,fwd,lf] of legs){
     const hx=x+n[0]*lat*.5, hy=y+n[1]*lat*.5;
     const fx=x+n[0]*lat+d[0]*(fwd+lf*.14), fy=y+n[1]*lat+d[1]*(fwd+lf*.14);
-    ctx.strokeStyle="#1f1608"; ctx.lineWidth=0.12;
+    ctx.strokeStyle="#1f1608"; ctx.lineWidth=0.14;
     ctx.beginPath(); ctx.moveTo(hx,hy); ctx.lineTo(fx,fy); ctx.stroke();
     ctx.fillStyle= lf>0.3? "#8a6a3a" : "#120c05";       // a raised boot shows lighter (knee up)
     ctx.beginPath(); ctx.ellipse(fx+d[0]*.03,fy+d[1]*.03,0.085+lf*.03,0.125+lf*.03,h,0,Math.PI*2); ctx.fill();
   }
   if(opt.dress){ ctx.strokeStyle=fill; ctx.lineWidth=0.09; ctx.beginPath(); ctx.moveTo(x-n[0]*.15,y-n[1]*.15); ctx.lineTo(x-n[0]*.62,y-n[1]*.62); ctx.stroke(); }
   ctx.fillStyle=fill; ctx.strokeStyle=stroke; ctx.lineWidth=0.05;
-  ctx.beginPath(); ctx.arc(x,y,0.19,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x,y,0.165,0,Math.PI*2); ctx.fill(); ctx.stroke();
   const fd=dirV(h + (opt.eyes? 45*D2R : 0));               // face marker: eyes right turns it 45°
   ctx.fillStyle="#e6dcc3"; ctx.beginPath(); ctx.arc(x+fd[0]*.11,y+fd[1]*.11,0.05,0,Math.PI*2); ctx.fill();
   if(opt.posture && opt.posture!=="attention"){ ctx.fillStyle="#120c05"; ctx.beginPath(); ctx.arc(x-d[0]*.21,y-d[1]*.21,0.05,0,Math.PI*2); ctx.fill(); } // hands behind back
@@ -191,7 +191,8 @@ function freshPart(key, n){
     return nw.length>pw.length+1 ? nw.slice(pw.length).join(" ") : "";
   }
   // Android Chrome repeats earlier words of the session in later results
-  return sessionText && n.startsWith(sessionText) ? n.slice(sessionText.length).trim() : n;
+  // (only when the new result is longer; saying the same command again is a new command)
+  return sessionText && n.length>sessionText.length && n.startsWith(sessionText+" ") ? n.slice(sessionText.length).trim() : n;
 }
 function hasExecWord(t){ return normalizeSpeech(t).split(" ").slice(-3).some(w=>execClassesOf(w)); }
 function handleResult(e){
@@ -315,7 +316,7 @@ function onCommandHeard(p, raw){
   const heardAt=now();
   if(heardAt-lastCmdT<600) return; lastCmdT=heardAt;
   const poll=()=>{
-    if(micOK && now()-lastLoudT<150 && now()-heardAt<900) return setTimeout(poll,40); // execution word still sounding
+    if(micOK && now()-lastLoudT<120 && now()-heardAt<250) return setTimeout(poll,30); // let the execution word finish (max 250 ms)
     judge(p, raw, heardAt, false);
   };
   poll();
@@ -331,7 +332,9 @@ function judge(p, raw, heardAt, typed){
   const fc=footCheck(c,a);
   if(fc && fc.wrong && S.foot==="reject") return reportVerdict(c,{ok:false,reason:"Wrong foot",detail:`Call it as the ${fc.want==="L"?"left":"right"} foot strikes`,ex:a.ex,prepSegs:a.prepSegs}, fc);
   // Executed on the next beat; foot-specific commands wait for the correct foot while marching.
-  const k=(marching() && (c.foot==="L"||c.foot==="R")) ? nextBeat(c.foot) : clock.k;
+  // Executed on the very next foot strike (TC 3-21.5: movement starts on the step after the command
+  // of execution). No waiting for a particular foot: whether it was called on the right foot is judged above.
+  const k=clock.k;
   at(k, ()=>{ if(!canExecute(c) || c.id==="fallin") execute(c); });
   reportVerdict(c, a, fc);
 }
@@ -457,8 +460,8 @@ async function begin(mode){
   if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) await setupMeter();
   else meterOffReason="Voice meter unavailable in this browser";
   if(!recOn) startRecognition(); else restartRec();
+  show("game"); resize();      // size the canvas first: the Snake field is fitted to it
   newGame(mode);
-  show("game"); resize();
   if(mode==="practice"){ G.move="mark"; flash("INFLECTION PRACTICE","ok",'Say any command, e.g. "Column right… MARCH!" Watch the meter.'); }
   else flash(mode==="snake"?"SNAKE: FALL IN":"DRILL FIELD","ok",`Say "Forward… MARCH!" to step off.`);
   if(!SR) $("detail").textContent="Speech recognition isn't supported in this browser. Only the inflection meter works.";
@@ -493,12 +496,13 @@ window.FG = {
   parse:t=>{ const p=parseCommand(t); return p? p.cmd.id : null; },
   cmd(text){ const p=parseCommand(text); if(!p) return "invalid"; judge(p,text,now(),true); return p.cmd.id; },
   /** Start a mode without mic/speech (headless): */
-  startHeadless(mode){ newGame(mode); show("game"); resize(); clock.lastT=now(); clock.nextT=now()+clock.period; lastFrame=now(); },
+  startHeadless(mode){ show("game"); resize(); newGame(mode); clock.lastT=now(); clock.nextT=now()+clock.period; lastFrame=now(); },
   /** Advance the simulation by ms in 16 ms steps (virtual time), then render. */
   sim(ms){ let t=lastFrame; const end=t+ms; while(t<end){ t+=16; simNow=t; step(t); } },
   state:()=>({move:G.move, tempo:G.tempo, fmode:F.mode, W:F.W, ranks:F.ranks.length, busy:G.busy, over:G.over, score:G.score, posture:G.posture,
              heading:Math.round(((F.mode==="column"?F.path.posAt(F.ranks[0].s).h:0)/D2R%360+360)%360),
              soldiers:allSoldiers().map(s=>[+s.x.toFixed(2),+s.y.toFixed(2),Math.round(((s.face/D2R)%360+360)%360)])}),
+  setRecOn(v){ recOn=v; },
   get G(){return G;}, get F(){return F;}, clock, settings, frames, handleResult, get rec(){return rec;}, get sessionText(){return sessionText;},
   analyse:(id,t)=>{ micOK=true; return analyseInflection(CMD[id], t); }, pushFrame, setFloor:v=>{noiseFloor=v;},
   showAnalysis:a=>{ lastAnalysis=a; },

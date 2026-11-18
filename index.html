@@ -95,7 +95,7 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
   <div id="noSR" class="notice"><b>Speech recognition isn't available in this browser.</b> Use Chrome on Android, or Safari on iOS 14.5 or later, over HTTPS. Inflection Practice still works.</div>
   <div id="noMic" class="notice"></div>
   <div class="card">
-    <b>To start, say "Fall in."</b> Your soldiers begin scattered across the field; calling <b>FALL IN</b> forms them up at attention, but ragged. Next say <b>"Cover"</b> (right arms up, everyone lines up behind the man in front), then <b>"Recover"</b> (arms down, aligned). Then say <b>"Forward… MARCH!"</b> to step off. A wrong call for the moment flashes a <b>!</b> over the drill sergeant for a second; nothing else happens.<br><b>Command your formation by voice.</b> Give the <b>preparatory command</b> ("Column right…"), then <b>emphasize the command of execution</b> ("MARCH!"). Make it louder, change your pitch on it, or pause briefly before it.<br>
+    <b>To start, say "Fall in."</b> Your soldiers begin scattered across the field; calling <b>FALL IN</b> forms them up at attention, but ragged. Next say <b>"Cover"</b> (left arms up, everyone lines up behind the man in front), then <b>"Recover"</b> (arms down, aligned). Then say <b>"Forward… MARCH!"</b> to step off. A wrong call for the moment flashes a <b>!</b> over the drill sergeant for a second; nothing else happens.<br><b>Command your formation by voice.</b> Give the <b>preparatory command</b> ("Column right…"), then <b>emphasize the command of execution</b> ("MARCH!"). Make it louder, change your pitch on it, or pause briefly before it.<br>
     <b>Recruit:</b> any one of those counts. <b>Soldier:</b> any two. <b>Drill Sergeant:</b> all of them, plus a short, sharp execution called on the correct foot. <b>Commands only:</b> no voice check, for warm-up.
   </div>
   <div class="card row" style="justify-content:space-between">
@@ -413,7 +413,7 @@ const CMDS = [
   {id:"dress", name:"Dress right, DRESS", exec:"DRESS", re:RIGHT, foot:null, when:"halt", desc:"Heads and eyes right, left arms extended. Soldiers align on the right file."},
   {id:"eyes", name:"Eyes, RIGHT", exec:"RIGHT", re:"(?:^|\\s)(?:eyes|eye|ice|i's|ayes|i)$", foot:"R", when:"any", desc:"Heads and eyes 45° right. While marching, the right file keeps looking to the front. Called as the right foot strikes."},
   {id:"front", name:"Ready, FRONT", exec:"FRONT", re:"ready|reddy|readi", foot:"L", when:"any", desc:"Ends Dress right or Eyes right. Called as the left foot strikes when marching."},
-  {id:"cover", name:"COVER", exec:"COVER", re:"", single:true, foot:null, when:"halt", desc:"At the halt, in column. Right arms up: the front rank (except the far-left man) holds it out to the right side, everyone behind holds it straight forward toward the man ahead. Each Soldier aligns directly behind the man in front at the correct distance and holds until RECOVER."},
+  {id:"cover", name:"COVER", exec:"COVER", re:"", single:true, foot:null, when:"halt", desc:"At the halt, in column. Left arms up at shoulder height: the front rank holds it straight out to the left side (except the front-left corner man, who has nobody to his left), everyone behind holds it straight forward toward the man ahead, stopping just short of him. Each Soldier aligns directly behind the man in front at the correct distance and holds until RECOVER."},
   {id:"recover", name:"RECOVER", exec:"RECOVER", re:"", single:true, foot:null, when:"halt", desc:"Ends COVER: arms snap down to the sides, back to attention, aligned. Only valid after COVER."},
   {id:"fallin", name:"Fall, IN", exec:"IN", re:"fall", foot:null, when:"any", desc:"Forms the platoon in column at attention. Resets position, and restarts after Formation Broke."},
 ];
@@ -1864,8 +1864,10 @@ function visOff(s){
   const d=dirV(s.face), n=nrmV(s.face), lat=(o.dx*w+bob)*k, fwd=o.du*w*k;
   return [n[0]*lat+d[0]*fwd, n[1]*lat+d[1]*fwd, o.dh*k];
 }
-/** Which arm each soldier raises at COVER, relative to the formation's facing: front rank right arm
-    out to the side (except the far-left man), everyone behind right arm forward to the man ahead. */
+/** Which arm each soldier raises at COVER, relative to the formation's facing (LEFT arm, shoulder height):
+    front rank holds it straight out to the LEFT side, except the front-left corner man (nobody to his left);
+    everyone behind holds it straight forward toward the man ahead. s.armReach = distance (centre to centre)
+    to the man the arm points at, so the drawn arm stops a tiny gap short of him. */
 function assignArms(){
   const sol=allSoldiers(); if(!sol.length) return;
   let fx=0, fy=0; for(const s of sol){ fx+=Math.sin(s.face); fy+=-Math.cos(s.face); }
@@ -1874,7 +1876,17 @@ function assignArms(){
   const maxF=Math.max(...sol.map(fw));
   const front=sol.filter(s=>fw(s)>maxF-0.5);
   const minR=Math.min(...front.map(rt));
-  for(const s of sol) s.arm = front.includes(s) ? (rt(s)<minR+0.3 ? null : "lat") : "fwd";
+  for(const s of sol){
+    let reach=Infinity;
+    if(front.includes(s)){
+      s.arm = rt(s)<minR+0.3 ? null : "lat";
+      for(const o of front) if(o!==s && rt(o)<rt(s)-0.3) reach=Math.min(reach, Math.hypot(o.x-s.x,o.y-s.y));
+    } else {
+      s.arm="fwd";
+      for(const o of sol) if(o!==s && Math.abs(rt(o)-rt(s))<0.4 && fw(o)>fw(s)+0.3) reach=Math.min(reach, Math.hypot(o.x-s.x,o.y-s.y));
+    }
+    s.armReach = isFinite(reach) ? reach : 1;
+  }
 }
 function startCover(){
   assignArms();
@@ -2001,10 +2013,20 @@ function drawSoldier(s, phase, sq){
   const vo=visOff(s), shuf=halted && s.shuffle;
   ctx.save(); ctx.translate(s.x+vo[0],s.y+vo[1]); ctx.scale(k,k);
   drawBody(0,0,s.face+vo[2], halted?0:amp, shuf? (now()/250+s.id*0.37)%2 : phase, "#3e4a1c","#151905", {
-    arm: G.cover ? s.arm : null,
+    arm: G.cover ? s.arm : null, armReach:s.armReach, k,
     posture:halted?G.posture:"attention", dress:G.dress && !rightFile, eyes:(G.eyes||G.dress) && !(marching() && rightFile && G.eyes) && !(G.dress && rightFile),
     lift: shuf? 0.6 : inPlace? 1-amp/0.2 : 0 });
   ctx.restore();
+}
+/* COVER arm geometry (sprite units, before the sprite scale k): attaches at the left shoulder, ends in a
+   hand; its fingertip stops ARM_GAP steps short of the neighbour's body (body radius BODY_R*k). */
+const ARM_SH=0.15, ARM_HAND=0.06, BODY_R=0.165, ARM_GAP=0.14;   // ~0.1 step clear of his outline stroke
+function armGeom(reach, k, kind){
+  const R=BODY_R*k+ARM_GAP, sh=ARM_SH*k;
+  // lateral: shoulder, fingertip and neighbour's centre are on one line; forward: the fingertip is off his
+  // centre line by the shoulder offset, so it stops where it is R from his centre
+  const tip = kind==="lat" ? reach-R-sh : reach-Math.sqrt(Math.max(0,R*R-sh*sh));
+  return clamp(tip/k - ARM_HAND, 0.12, 0.62);
 }
 function drawBody(x,y,h,amp,phase,fill,stroke,opt){
   const d=dirV(h), n=nrmV(h);
@@ -2023,12 +2045,12 @@ function drawBody(x,y,h,amp,phase,fill,stroke,opt){
     ctx.fillStyle= lf>0.3? "#8a6a3a" : "#120c05";       // a raised boot shows lighter (knee up)
     ctx.beginPath(); ctx.ellipse(fx+d[0]*.03,fy+d[1]*.03,0.085+lf*.03,0.125+lf*.03,h,0,Math.PI*2); ctx.fill();
   }
-  if(opt.arm){                                             // COVER: right arm out to the side, or straight forward
-    const sx=x+n[0]*.15, sy=y+n[1]*.15, v= opt.arm==="lat" ? n : d, L= opt.arm==="lat" ? 0.62 : 0.66;
-    const ex=sx+v[0]*L, ey=sy+v[1]*L;
+  if(opt.arm){                                             // COVER: LEFT arm out to the left side, or straight forward
+    const g=armGeom(opt.armReach, opt.k||1, opt.arm), v= opt.arm==="lat" ? [-n[0],-n[1]] : d;
+    const sx=x-n[0]*ARM_SH, sy=y-n[1]*ARM_SH, ex=sx+v[0]*g, ey=sy+v[1]*g;
     ctx.strokeStyle="#151905"; ctx.lineWidth=0.15; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
     ctx.strokeStyle=fill; ctx.lineWidth=0.09; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
-    ctx.fillStyle="#d9b98c"; ctx.beginPath(); ctx.arc(ex,ey,0.06,0,Math.PI*2); ctx.fill();   // hand
+    ctx.fillStyle="#d9b98c"; ctx.beginPath(); ctx.arc(ex,ey,ARM_HAND,0,Math.PI*2); ctx.fill();   // hand
   }
   if(opt.dress){ ctx.strokeStyle=fill; ctx.lineWidth=0.09; ctx.beginPath(); ctx.moveTo(x-n[0]*.15,y-n[1]*.15); ctx.lineTo(x-n[0]*.62,y-n[1]*.62); ctx.stroke(); }
   ctx.fillStyle=fill; ctx.strokeStyle=stroke; ctx.lineWidth=0.05;
@@ -2689,7 +2711,14 @@ window.FG = {
   phase:()=>G.phase,
   bang:()=>({on: !!(G.bangT && now()-G.bangT<BANG_MS), n:G.bangN||0, t:G.bangT||null}),
   cover:()=>({cover:!!G.cover, hold:!!(G.cover&&G.cover.hold), sloppy:!!G.sloppy}),
-  arms:()=>allSoldiers().map(s=>({x:s.x,y:s.y,face:s.face,arm:G.cover? (s.arm||null) : null})),
+  arms:()=>{ const k=G.mode==="snake"?1.4:1.25, sol=allSoldiers();
+    return sol.map(s=>{ const arm=G.cover? (s.arm||null) : null, o={x:s.x,y:s.y,face:s.face,arm};
+      if(arm){ const d=dirV(s.face), n=nrmV(s.face), v= arm==="lat"? [-n[0],-n[1]] : d, L=armGeom(s.armReach,k,arm);
+        const sx=s.x-n[0]*ARM_SH*k, sy=s.y-n[1]*ARM_SH*k, hx=sx+v[0]*L*k, hy=sy+v[1]*L*k;
+        const tx=hx+v[0]*ARM_HAND*k, ty=hy+v[1]*ARM_HAND*k;               // fingertip
+        o.tip=[tx,ty]; o.gap=Math.min(...sol.filter(q=>q!==s).map(q=>Math.hypot(q.x-tx,q.y-ty)-BODY_R*k));
+        o.side = (tx-s.x)*n[0]+(ty-s.y)*n[1]; o.ahead=(tx-s.x)*d[0]+(ty-s.y)*d[1]; }
+      return o; }); },
   visual:()=>allSoldiers().map(s=>{ const o=visOff(s); return {x:s.x,y:s.y,vx:s.x+o[0],vy:s.y+o[1],df:o[2]}; }),
   isBareExec,
   // tests: skip the fall-in run

@@ -56,7 +56,7 @@ const puppeteer=require('puppeteer-core'), P=require('path');
   return out; });
  ck(c.move==="halt" && c.recoverErr, "RECOVER without COVER: '!' and nothing else");
  ck(c.adjusting && c.hold && !c.sloppy && c.maxOff===0, `COVER: soldiers shuffle into place, then exact (max visual offset ${c.maxOff})`);
- ck(c.arms.filter(a=>a==="lat").length===3 && c.arms.filter(a=>a==="fwd").length===12 && c.arms.filter(a=>!a).length===1, `COVER arms: 3 lateral, 12 forward, 1 down (${c.arms.join(",")})`);
+ ck(c.arms.filter(a=>a==="lat").length===3 && c.arms.filter(a=>a==="fwd").length===12 && c.arms.filter(a=>!a).length===1, `COVER arms (left): 3 lateral, 12 forward, 1 down (${c.arms.join(",")})`);
  ck(c.fwdErr, "Forward MARCH while at COVER: '!' and no movement (call RECOVER first)");
  await shot('cover-3-arms-out'); await zoom('cover-3-arms-out-zoom');
  const r=await p.evaluate(()=>{ FG.sim(1100); FG.cmd("recover"); FG.sim(700); const v=FG.visual();
@@ -82,13 +82,19 @@ const puppeteer=require('puppeteer-core'), P=require('path');
     const f={0:s=>-s.y,90:s=>s.x,180:s=>s.y,270:s=>-s.x}[h], rt={0:s=>s.x,90:s=>s.y,180:s=>-s.x,270:s=>-s.y}[h];
     const maxF=Math.max(...a.map(f)), front=a.filter(s=>f(s)>maxF-0.5), farLeft=front.reduce((m,s)=>rt(s)<rt(m)?s:m);
     let ok=true; for(const s of a){ const want = s===farLeft? null : front.includes(s)? "lat" : "fwd"; if(s.arm!==want) ok=false; }
-    out.push({h, ok, lat:a.filter(s=>s.arm==="lat").length, fwd:a.filter(s=>s.arm==="fwd").length, none:a.filter(s=>!s.arm).length, heading:Math.round(((a[0].face*57.2958)%360+360)%360)});
+    const raised=a.filter(s=>s.arm), lat=raised.filter(s=>s.arm==="lat"), fwd=raised.filter(s=>s.arm==="fwd");
+    const leftSide=lat.every(s=>s.side < -0.3 && Math.abs(s.ahead)<0.05) && fwd.every(s=>s.ahead>0.3 && s.side<0);   // lateral arms go LEFT; forward arms from the left shoulder
+    const gaps=raised.map(s=>s.gap), minGap=Math.min(...gaps), maxGap=Math.max(...gaps);
+    out.push({h, ok, leftSide, minGap:+minGap.toFixed(3), maxGap:+maxGap.toFixed(3), lat:a.filter(s=>s.arm==="lat").length, fwd:a.filter(s=>s.arm==="fwd").length, none:a.filter(s=>!s.arm).length, heading:Math.round(((a[0].face*57.2958)%360+360)%360)});
     FG.cmd("recover"); FG.sim(400);
   }
   return out; });
  await p.evaluate(()=>{ FG.startHeadless('snake'); FG.setRecOn(true); FG.settings.sens="none"; FG.G.recruits.length=0; FG.cmd("cover"); FG.sim(2200); });
  await shot('cover-6-arms-north'); await zoom('cover-6-arms-north-zoom');
- for(const a of arms) ck(a.ok && a.lat===3 && a.fwd===12 && a.none===1 && Math.abs(((a.heading-a.h)%360+360)%360)<2, `facing ${a.h}°: front rank right arm out to the side (${a.lat}), far-left man arm down (${a.none}), rear ranks arm forward (${a.fwd})`);
+ const sg=await p.evaluate(()=>{ const g=FG.arms().filter(a=>a.arm).map(a=>a.gap); return {n:g.length, min:Math.min(...g), max:Math.max(...g)}; });
+ ck(sg.n===15 && sg.min>0.02 && sg.max<0.2, `snake field scale: ${sg.n} arms up, fingertip gap ${sg.min.toFixed(3)}–${sg.max.toFixed(3)} step`);
+ for(const a of arms) ck(a.leftSide && a.minGap>0.02 && a.maxGap<0.2, `facing ${a.h}°: LEFT arms (lateral to the left, forward from the left shoulder); fingertip gap to the next man ${a.minGap}–${a.maxGap} step (never touching)`);
+ for(const a of arms) ck(a.ok && a.lat===3 && a.fwd===12 && a.none===1 && Math.abs(((a.heading-a.h)%360+360)%360)<2, `facing ${a.h}°: front rank left arm out to the left side (${a.lat}), front-left corner man arm down (${a.none}), rear ranks arm forward (${a.fwd})`);
 
  // ---- error list: each shows '!' for ~1 s and changes nothing else
  const errsR=await p.evaluate(()=>{

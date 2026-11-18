@@ -102,10 +102,20 @@ function drawSoldier(s, phase, sq){
   const vo=visOff(s), shuf=halted && s.shuffle;
   ctx.save(); ctx.translate(s.x+vo[0],s.y+vo[1]); ctx.scale(k,k);
   drawBody(0,0,s.face+vo[2], halted?0:amp, shuf? (now()/250+s.id*0.37)%2 : phase, "#3e4a1c","#151905", {
-    arm: G.cover ? s.arm : null,
+    arm: G.cover ? s.arm : null, armReach:s.armReach, k,
     posture:halted?G.posture:"attention", dress:G.dress && !rightFile, eyes:(G.eyes||G.dress) && !(marching() && rightFile && G.eyes) && !(G.dress && rightFile),
     lift: shuf? 0.6 : inPlace? 1-amp/0.2 : 0 });
   ctx.restore();
+}
+/* COVER arm geometry (sprite units, before the sprite scale k): attaches at the left shoulder, ends in a
+   hand; its fingertip stops ARM_GAP steps short of the neighbour's body (body radius BODY_R*k). */
+const ARM_SH=0.15, ARM_HAND=0.06, BODY_R=0.165, ARM_GAP=0.14;   // ~0.1 step clear of his outline stroke
+function armGeom(reach, k, kind){
+  const R=BODY_R*k+ARM_GAP, sh=ARM_SH*k;
+  // lateral: shoulder, fingertip and neighbour's centre are on one line; forward: the fingertip is off his
+  // centre line by the shoulder offset, so it stops where it is R from his centre
+  const tip = kind==="lat" ? reach-R-sh : reach-Math.sqrt(Math.max(0,R*R-sh*sh));
+  return clamp(tip/k - ARM_HAND, 0.12, 0.62);
 }
 function drawBody(x,y,h,amp,phase,fill,stroke,opt){
   const d=dirV(h), n=nrmV(h);
@@ -124,12 +134,12 @@ function drawBody(x,y,h,amp,phase,fill,stroke,opt){
     ctx.fillStyle= lf>0.3? "#8a6a3a" : "#120c05";       // a raised boot shows lighter (knee up)
     ctx.beginPath(); ctx.ellipse(fx+d[0]*.03,fy+d[1]*.03,0.085+lf*.03,0.125+lf*.03,h,0,Math.PI*2); ctx.fill();
   }
-  if(opt.arm){                                             // COVER: right arm out to the side, or straight forward
-    const sx=x+n[0]*.15, sy=y+n[1]*.15, v= opt.arm==="lat" ? n : d, L= opt.arm==="lat" ? 0.62 : 0.66;
-    const ex=sx+v[0]*L, ey=sy+v[1]*L;
+  if(opt.arm){                                             // COVER: LEFT arm out to the left side, or straight forward
+    const g=armGeom(opt.armReach, opt.k||1, opt.arm), v= opt.arm==="lat" ? [-n[0],-n[1]] : d;
+    const sx=x-n[0]*ARM_SH, sy=y-n[1]*ARM_SH, ex=sx+v[0]*g, ey=sy+v[1]*g;
     ctx.strokeStyle="#151905"; ctx.lineWidth=0.15; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
     ctx.strokeStyle=fill; ctx.lineWidth=0.09; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
-    ctx.fillStyle="#d9b98c"; ctx.beginPath(); ctx.arc(ex,ey,0.06,0,Math.PI*2); ctx.fill();   // hand
+    ctx.fillStyle="#d9b98c"; ctx.beginPath(); ctx.arc(ex,ey,ARM_HAND,0,Math.PI*2); ctx.fill();   // hand
   }
   if(opt.dress){ ctx.strokeStyle=fill; ctx.lineWidth=0.09; ctx.beginPath(); ctx.moveTo(x-n[0]*.15,y-n[1]*.15); ctx.lineTo(x-n[0]*.62,y-n[1]*.62); ctx.stroke(); }
   ctx.fillStyle=fill; ctx.strokeStyle=stroke; ctx.lineWidth=0.05;
@@ -790,7 +800,14 @@ window.FG = {
   phase:()=>G.phase,
   bang:()=>({on: !!(G.bangT && now()-G.bangT<BANG_MS), n:G.bangN||0, t:G.bangT||null}),
   cover:()=>({cover:!!G.cover, hold:!!(G.cover&&G.cover.hold), sloppy:!!G.sloppy}),
-  arms:()=>allSoldiers().map(s=>({x:s.x,y:s.y,face:s.face,arm:G.cover? (s.arm||null) : null})),
+  arms:()=>{ const k=G.mode==="snake"?1.4:1.25, sol=allSoldiers();
+    return sol.map(s=>{ const arm=G.cover? (s.arm||null) : null, o={x:s.x,y:s.y,face:s.face,arm};
+      if(arm){ const d=dirV(s.face), n=nrmV(s.face), v= arm==="lat"? [-n[0],-n[1]] : d, L=armGeom(s.armReach,k,arm);
+        const sx=s.x-n[0]*ARM_SH*k, sy=s.y-n[1]*ARM_SH*k, hx=sx+v[0]*L*k, hy=sy+v[1]*L*k;
+        const tx=hx+v[0]*ARM_HAND*k, ty=hy+v[1]*ARM_HAND*k;               // fingertip
+        o.tip=[tx,ty]; o.gap=Math.min(...sol.filter(q=>q!==s).map(q=>Math.hypot(q.x-tx,q.y-ty)-BODY_R*k));
+        o.side = (tx-s.x)*n[0]+(ty-s.y)*n[1]; o.ahead=(tx-s.x)*d[0]+(ty-s.y)*d[1]; }
+      return o; }); },
   visual:()=>allSoldiers().map(s=>{ const o=visOff(s); return {x:s.x,y:s.y,vx:s.x+o[0],vy:s.y+o[1],df:o[2]}; }),
   isBareExec,
   // tests: skip the fall-in run

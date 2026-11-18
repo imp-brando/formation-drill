@@ -749,8 +749,10 @@ function visOff(s){
   const d=dirV(s.face), n=nrmV(s.face), lat=(o.dx*w+bob)*k, fwd=o.du*w*k;
   return [n[0]*lat+d[0]*fwd, n[1]*lat+d[1]*fwd, o.dh*k];
 }
-/** Which arm each soldier raises at COVER, relative to the formation's facing: front rank right arm
-    out to the side (except the far-left man), everyone behind right arm forward to the man ahead. */
+/** Which arm each soldier raises at COVER, relative to the formation's facing (LEFT arm, shoulder height):
+    front rank holds it straight out to the LEFT side, except the front-left corner man (nobody to his left);
+    everyone behind holds it straight forward toward the man ahead. s.armReach = distance (centre to centre)
+    to the man the arm points at, so the drawn arm stops a tiny gap short of him. */
 function assignArms(){
   const sol=allSoldiers(); if(!sol.length) return;
   let fx=0, fy=0; for(const s of sol){ fx+=Math.sin(s.face); fy+=-Math.cos(s.face); }
@@ -759,7 +761,17 @@ function assignArms(){
   const maxF=Math.max(...sol.map(fw));
   const front=sol.filter(s=>fw(s)>maxF-0.5);
   const minR=Math.min(...front.map(rt));
-  for(const s of sol) s.arm = front.includes(s) ? (rt(s)<minR+0.3 ? null : "lat") : "fwd";
+  for(const s of sol){
+    let reach=Infinity;
+    if(front.includes(s)){
+      s.arm = rt(s)<minR+0.3 ? null : "lat";
+      for(const o of front) if(o!==s && rt(o)<rt(s)-0.3) reach=Math.min(reach, Math.hypot(o.x-s.x,o.y-s.y));
+    } else {
+      s.arm="fwd";
+      for(const o of sol) if(o!==s && Math.abs(rt(o)-rt(s))<0.4 && fw(o)>fw(s)+0.3) reach=Math.min(reach, Math.hypot(o.x-s.x,o.y-s.y));
+    }
+    s.armReach = isFinite(reach) ? reach : 1;
+  }
 }
 function startCover(){
   assignArms();

@@ -61,6 +61,10 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
 #detail{font-size:12px;color:var(--khaki);min-height:15px}
 #heard{font-size:12px;color:#e9e3d0;opacity:.85;min-height:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #heard i{color:var(--khaki)}
+#srStatus{font-size:12px;color:#e9e3d0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#srStatus.ok{color:#9be37f} #srStatus.warn{color:#ffd27a} #srStatus.bad{color:#ff9d8a}
+#pttBtn{flex:none;line-height:1.1;touch-action:none;user-select:none;-webkit-user-select:none}
+#pttBtn.held{background:var(--red);border-color:#ffd9d0}
 #cadBar{border-top:1px dashed rgba(195,176,145,.4);padding-top:5px}
 #cadBar .row{gap:6px}
 #cadLines{font-size:13px;line-height:1.35;margin-top:4px}
@@ -99,6 +103,13 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
       <select id="unitWord"><option>Platoon</option><option>Squad</option><option>Flight</option></select>
     </label>
     <label><input type="checkbox" id="tickOn" checked> Step tick</label>
+    <label style="flex-basis:100%">Mic
+      <select id="micMode">
+        <option value="auto" selected>Auto (recommended)</option>
+        <option value="rec">Speech only (no voice meter)</option>
+        <option value="both">Speech + voice meter (force)</option>
+      </select>
+    </label>
   </div>
   <div class="modes">
     <button class="primary" data-mode="snake">▶ Snake Game: tap to start (enables mic)</button>
@@ -139,7 +150,13 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
     <canvas id="meter" width="500" height="84"></canvas>
     <div id="verdict">Waiting for command…</div>
     <div id="detail"></div>
-    <div id="heard"><i>Heard:</i> <span id="heardTxt">—</span></div>
+    <div class="row" style="flex-wrap:nowrap;gap:6px">
+      <div style="flex:1;min-width:0">
+        <div id="srStatus">Speech: starting…</div>
+        <div id="heard"><i>Heard:</i> <span id="heardTxt">—</span></div>
+      </div>
+      <button id="pttBtn" class="small" title="Hold while you speak if commands aren't being heard">🎙 Hold<br>to talk</button>
+    </div>
     <div id="debug"><input id="dbgIn" placeholder="debug: type a command, e.g. column right march"><button class="small" id="dbgGo">Send</button></div>
     <div id="cadBar" class="collapsed">
       <div class="row">

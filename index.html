@@ -61,6 +61,10 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
 #detail{font-size:12px;color:var(--khaki);min-height:15px}
 #heard{font-size:12px;color:#e9e3d0;opacity:.85;min-height:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #heard i{color:var(--khaki)}
+#srStatus{font-size:12px;color:#e9e3d0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#srStatus.ok{color:#9be37f} #srStatus.warn{color:#ffd27a} #srStatus.bad{color:#ff9d8a}
+#pttBtn{flex:none;line-height:1.1;touch-action:none;user-select:none;-webkit-user-select:none}
+#pttBtn.held{background:var(--red);border-color:#ffd9d0}
 #cadBar{border-top:1px dashed rgba(195,176,145,.4);padding-top:5px}
 #cadBar .row{gap:6px}
 #cadLines{font-size:13px;line-height:1.35;margin-top:4px}
@@ -99,6 +103,13 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
       <select id="unitWord"><option>Platoon</option><option>Squad</option><option>Flight</option></select>
     </label>
     <label><input type="checkbox" id="tickOn" checked> Step tick</label>
+    <label style="flex-basis:100%">Mic
+      <select id="micMode">
+        <option value="auto" selected>Auto (recommended)</option>
+        <option value="rec">Speech only (no voice meter)</option>
+        <option value="both">Speech + voice meter (force)</option>
+      </select>
+    </label>
   </div>
   <div class="modes">
     <button class="primary" data-mode="snake">▶ Snake Game: tap to start (enables mic)</button>
@@ -139,7 +150,13 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
     <canvas id="meter" width="500" height="84"></canvas>
     <div id="verdict">Waiting for command…</div>
     <div id="detail"></div>
-    <div id="heard"><i>Heard:</i> <span id="heardTxt">—</span></div>
+    <div class="row" style="flex-wrap:nowrap;gap:6px">
+      <div style="flex:1;min-width:0">
+        <div id="srStatus">Speech: starting…</div>
+        <div id="heard"><i>Heard:</i> <span id="heardTxt">—</span></div>
+      </div>
+      <button id="pttBtn" class="small" title="Hold while you speak if commands aren't being heard">🎙 Hold<br>to talk</button>
+    </div>
     <div id="debug"><input id="dbgIn" placeholder="debug: type a command, e.g. column right march"><button class="small" id="dbgGo">Send</button></div>
     <div id="cadBar" class="collapsed">
       <div class="row">
@@ -467,8 +484,15 @@ async function startMic(){
   const src=actx.createMediaStreamSource(micStream);
   analyser=actx.createAnalyser(); analyser.fftSize=2048; analyser.smoothingTimeConstant=0;
   src.connect(analyser); audioBuf=new Float32Array(analyser.fftSize); micOK=true;
-  setInterval(analyseFrame, 25);
+  clearInterval(frameTimer); frameTimer=setInterval(analyseFrame, 25);
   return true;
+}
+let frameTimer=null;
+/** Release the mic stream (used when the voice meter would starve speech recognition, e.g. Android Chrome). */
+function stopMic(){
+  clearInterval(frameTimer); frameTimer=null; micOK=false;
+  if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
+  analyser=null;
 }
 /** One analysis frame: RMS level (dBFS), level above the noise floor, and pitch (Hz) */
 function analyseFrame(){
@@ -547,7 +571,7 @@ const energyMean = fr => 10*Math.log10(fr.reduce((a,f)=>a+Math.pow(10,f.rel/10),
 
 /** Measure how the command of execution was emphasised. Returns metrics or a reason it couldn't. */
 function measureEmphasis(heardAt){
-  if(!micOK) return {unavailable:"no mic level"};
+  if(!micOK) return {unavailable: meterOffReason || "no mic level", meterOff:true};
   const from=Math.max(heardAt-6000, ttsQuietSince), to=Math.min(now(), heardAt+1000);
   let segs=segmentsBetween(from, to);
   if(!segs.length){
@@ -583,7 +607,9 @@ function analyseInflection(cmd, heardAt){
   if(lvl==="none") return {ok:true, detail:"Commands only: no inflection check"};
   const m=measureEmphasis(heardAt);
   if(m.unavailable){
-    if(lvl==="ds") return {ok:false, reason:"Couldn't hear inflection", hint:"Speak up and pause briefly before the last word ("+m.unavailable+")", ex:m.ex, checks:[]};
+    // Only reject when the meter is running but couldn't measure. If the meter is off (e.g. Android can't
+    // share the mic with speech recognition), commands are accepted on every level.
+    if(lvl==="ds" && !m.meterOff) return {ok:false, reason:"Couldn't hear inflection", hint:"Speak up and pause briefly before the last word ("+m.unavailable+")", ex:m.ex, checks:[]};
     return {ok:true, warn:"Inflection not measured ("+m.unavailable+"), accepted", ex:m.ex};
   }
   const ck=[
@@ -1052,7 +1078,7 @@ function drawMeter(){
   for(const f of frames){ if(f.t<t1-span) continue; mctx.fillStyle=f.db>th?"#c3b091":"#4a5230"; mctx.fillRect(X(f.t),dbY(f.db),W/160,H-dbY(f.db)); }
   for(const f of frames){ if(f.t<t1-span||!f.hz) continue; const y=H-clamp(Math.log2(f.hz/70)/Math.log2(450/70),0,1)*H; mctx.fillStyle="#ff9d3a"; mctx.fillRect(X(f.t)-1.5,y-1.5,3,3); }
   mctx.fillStyle="rgba(230,220,195,.75)"; mctx.font="10px system-ui"; mctx.fillText("pitch ●   volume ▮   prep ▭ blue · exec ▭ green/red", 4, 11);
-  if(!micOK){ mctx.fillStyle="#ff9d8a"; mctx.fillText("mic off: inflection not measured", 4, H-5); }
+  if(!micOK){ mctx.fillStyle="#ffd27a"; mctx.font="12px system-ui"; mctx.fillText(meterOffReason||"Voice meter off", 4, H/2); mctx.font="10px system-ui"; mctx.fillText("Commands still work. Inflection isn't checked.", 4, H/2+15); }
   // measured vs needed for the last command (transparency)
   if(lastAnalysis && lastAnalysis.checks && lastAnalysis.checks.length){
     mctx.fillStyle="rgba(12,14,5,.88)"; mctx.fillRect(0,H-32,W,32);   // readable backdrop for the values
@@ -1069,31 +1095,141 @@ function drawMeter(){
 }
 
 /* ======================================================================
-   SPEECH RECOGNITION (continuous, interim results)
+   SPEECH RECOGNITION + MIC SHARING
+   Android Chrome often starves SpeechRecognition when a getUserMedia stream
+   (our voice meter) is open at the same time. Mic modes:
+     auto: desktop/iOS run both. On Android, speech starts ALONE; the meter is
+           only tried after speech is proven to work, and is dropped if it
+           stops recognition from delivering results. The outcome is saved.
+     rec:  speech recognition only (no voice meter; commands always accepted)
+     both: force both (for phones that can share the mic)
 ====================================================================== */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec=null, recOn=false, session=0, lastCmdT=0, ttsBusy=false, ttsQuietSince=-Infinity;
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+let rec=null, recOn=false, recRunning=false, session=0, lastCmdT=-Infinity, ttsBusy=false, ttsQuietSince=-Infinity;
+let sessionText="", lastRecStart=0, lastResultT=0, ptt=false, restartTimer=null, watchdogTimer=null, lastRecError="";
+let micMode = ["auto","rec","both"].includes(localStorage.getItem("formation.micMode")) ? localStorage.getItem("formation.micMode") : "auto";
+let coexist = localStorage.getItem("formation.coexist");   // "yes" | "no" | null (untested)
+let meterOffReason = "", pendingProbe=false, probe=null;
 const consumed=new Set();
-function startRecognition(){
-  if(!SR) return false;
-  rec=new SR(); rec.continuous=true; rec.interimResults=true; rec.lang="en-US"; rec.maxAlternatives=3;
-  rec.onstart=()=>{ session++; };
-  rec.onresult=e=>{
-    for(let i=e.resultIndex;i<e.results.length;i++){
-      const res=e.results[i], key=session+":"+i;
-      $("heardTxt").textContent=res[0].transcript;
-      if(consumed.has(key)) continue;
-      if(ttsBusy || now()<ttsQuietSince){ $("heardTxt").textContent="(ignored: cadence voice) "+res[0].transcript; continue; } // never obey our own TTS
-      let hit=null;
-      for(let a=0;a<res.length && !hit;a++){ const p=parseCommand(res[a].transcript); if(p) hit=[p,res[a].transcript]; }
-      if(hit){ consumed.add(key); onCommandHeard(hit[0], hit[1]); }
-      else if(res.isFinal && /\b(march|halt|face|rest|ease|dress|front)\b/i.test(res[0].transcript)) flash("NOT A VALID COMMAND","bad","Heard: "+res[0].transcript);
-    }
+const normText = t => t.toLowerCase().replace(/[^a-z0-9' ]+/g," ").replace(/\s+/g," ").trim();
+function setStatus(txt, cls){ const el=$("srStatus"); if(el){ el.textContent=txt; el.className=cls||""; } }
+
+function makeRec(){
+  const r=new SR();
+  r.lang="en-US"; r.interimResults=true; r.maxAlternatives=3;
+  r.continuous = !IS_ANDROID && !ptt;      // Android: short sessions restarted immediately are the most reliable
+  r.onstart=()=>{ session++; sessionText=""; recRunning=true; lastRecStart=now(); lastRecError="";
+    setStatus(ptt? "🎙 Listening (hold)…" : "🎙 Listening"+(micOK?" · voice meter on":" · speech only"), "ok"); };
+  r.onresult=handleResult;
+  r.onerror=e=>{
+    lastRecError=e.error;
+    if(e.error==="not-allowed"||e.error==="service-not-allowed"){ recOn=false; setStatus("Speech recognition blocked ("+e.error+"). Allow the microphone for this site in Chrome settings, then reload.","bad"); flash("SPEECH RECOGNITION BLOCKED","bad","Allow microphone access for this site, then reload."); return; }
+    if(e.error==="audio-capture" && micOK && IS_ANDROID && micMode!=="both"){ disableMeter("Voice meter off: this phone can't share the mic with speech recognition"); return; }
+    if(e.error==="network") setStatus("Speech recognition needs an internet connection (network error). Retrying…","bad");
+    // "no-speech" and "aborted" are routine; onend restarts
   };
-  rec.onerror=e=>{ if(e.error==="not-allowed"||e.error==="service-not-allowed"){ recOn=false; flash("SPEECH RECOGNITION BLOCKED","bad","Allow microphone and speech access, then reload. ("+e.error+")"); } };
-  rec.onend=()=>{ if(recOn) setTimeout(()=>{ try{ rec.start(); }catch(_){} }, 150); };  // mobile sessions end often
-  recOn=true; try{ rec.start(); }catch(_){}
+  r.onend=()=>{ recRunning=false; if(recOn && !ptt) scheduleRestart(lastRecError==="network"?1500:40); };
+  return r;
+}
+function startRecognition(){
+  if(!SR){ setStatus("Speech recognition isn't supported in this browser. Use Chrome on Android.","bad"); return false; }
+  recOn=true; restartRec();
+  clearInterval(watchdogTimer); watchdogTimer=setInterval(()=>{ if(recOn && !recRunning && !ptt && now()-lastRecStart>2500) restartRec(); }, 1500);
   return true;
+}
+function restartRec(){
+  try{ if(rec){ rec.onend=null; rec.abort(); } }catch(_){}
+  recRunning=false; rec=makeRec();
+  try{ rec.start(); lastRecStart=now(); }catch(_){ scheduleRestart(250); }
+}
+function scheduleRestart(ms){ clearTimeout(restartTimer); restartTimer=setTimeout(()=>{ if(recOn && !recRunning && !ptt) restartRec(); }, ms); }
+
+function handleResult(e){
+  lastResultT=now();
+  if(probe) probe.results++;
+  let triggerProbe=false;
+  for(let i=e.resultIndex;i<e.results.length;i++){
+    const res=e.results[i], key=session+":"+i, top=res[0].transcript.trim();
+    $("heardTxt").textContent=top;
+    if(consumed.has(key)) continue;
+    if(ttsBusy || now()<ttsQuietSince){ $("heardTxt").textContent="(ignored: cadence voice) "+top; continue; } // never obey our own TTS
+    let hit=null;
+    for(let a=0;a<res.length && !hit;a++){
+      const n=normText(res[a].transcript);
+      // Android Chrome repeats earlier words in later results; only parse what's new this session
+      const fresh = sessionText && n.startsWith(sessionText) ? n.slice(sessionText.length) : n;
+      const p=parseCommand(fresh); if(p) hit={p, raw:res[a].transcript, n};
+    }
+    if(hit){
+      consumed.add(key); sessionText=hit.n;
+      setStatus(`Heard "${hit.raw.trim()}" → ${hit.p.cmd.name}`, "ok");
+      onCommandHeard(hit.p, hit.raw); triggerProbe=true;
+    } else if(res.isFinal){
+      triggerProbe=true;
+      setStatus(`Heard "${top}": not a drill command`, "warn");
+      if(/\b(march|halt|face|rest|ease|dress|front)\b/i.test(top)) flash("NOT A VALID COMMAND","bad","Heard: "+top);
+    }
+  }
+  // Speech is proven to work: now try adding the voice meter (after this utterance is handled)
+  if(pendingProbe && triggerProbe) setTimeout(startProbeAfterSpeech, 300);
+}
+
+/* ---------- Voice meter (getUserMedia) setup and the Android coexistence probe ---------- */
+async function setupMeter(){
+  if(micOK) return;
+  if(micMode==="rec"){ meterOffReason="Voice meter off (speech-only mode)"; return; }
+  if(micMode==="both" || !IS_ANDROID || coexist==="yes"){ await startMic(); return; }
+  if(coexist==="no"){ meterOffReason="Voice meter off: this phone can't share the mic with speech recognition"; return; }
+  meterOffReason="Voice meter starts after your first command is heard";   // Android, untested: speech first
+  pendingProbe=true;
+}
+async function startProbeAfterSpeech(){
+  pendingProbe=false;
+  const ok=await startMic();
+  if(!ok){ meterOffReason="Voice meter unavailable"; return; }
+  meterOffReason="";
+  probe={t0:now(), results:0, firstVoice:0};
+  setStatus("Checking whether the voice meter and speech recognition can share the mic… say a command","warn");
+  setTimeout(checkProbe, 500);
+}
+function checkProbe(){
+  if(!probe || !micOK) return;
+  const t=now(), voiced=frames.filter(f=>f.t>probe.t0 && f.rel>VOICE_REL);
+  if(voiced.length && !probe.firstVoice) probe.firstVoice=voiced[0].t;
+  if(probe.results>0 && voiced.length>=4){          // both delivered: they coexist
+    coexist="yes"; localStorage.setItem("formation.coexist","yes"); probe=null;
+    setStatus("🎙 Listening · voice meter on (shares the mic fine)","ok"); return;
+  }
+  if(probe.firstVoice && voiced.length>=20 && t-probe.firstVoice>4000 && probe.results===0)
+    return disableMeter("Voice meter off: it was blocking speech recognition on this phone");
+  if(probe.results>=2 && voiced.length===0 && t-probe.t0>6000)
+    return disableMeter("Voice meter off: this phone mutes it while recognising speech");
+  if(t-probe.t0>30000 && probe.results===0 && !probe.firstVoice){ probe.t0=t; }   // nobody spoke yet, keep waiting
+  setTimeout(checkProbe, 500);
+}
+function disableMeter(reason){
+  stopMic(); probe=null; pendingProbe=false; meterOffReason=reason;
+  coexist="no"; localStorage.setItem("formation.coexist","no");
+  restartRec();
+  setStatus("🎙 Listening · speech only. "+reason+". Commands are accepted without the voice check.","warn");
+}
+
+/* ---------- Hold-to-talk backup: forces a fresh recognition session while held ---------- */
+function pttDown(e){
+  if(e) e.preventDefault();
+  if(!SR) return;
+  ptt=true; recOn=true; clearTimeout(restartTimer);
+  try{ if(rec){ rec.onend=null; rec.abort(); } }catch(_){}
+  rec=makeRec(); rec.onend=()=>{ recRunning=false; if(!ptt) scheduleRestart(40); };
+  try{ rec.start(); }catch(_){}
+  $("pttBtn").classList.add("held");
+}
+function pttUp(){
+  if(!ptt) return;
+  ptt=false; $("pttBtn").classList.remove("held");
+  try{ rec.stop(); }catch(_){}           // stop() delivers the final result, then onend resumes auto-listening
+  scheduleRestart(1200);
 }
 
 /** A command was parsed: wait for the voice to stop, then judge inflection, foot, and state. */
@@ -1237,8 +1373,12 @@ function frame(){ if(!running) return; step(now()); requestAnimationFrame(frame)
 async function begin(mode){
   settings.sens=$("sens").value; saveSens(settings.sens); settings.unit=$("unitWord").value; settings.tick=$("tickOn").checked;
   ensureAudio();
-  if(!micOK && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) await startMic();
-  if(!recOn) startRecognition();
+  micMode=$("micMode").value; localStorage.setItem("formation.micMode",micMode);
+  if(micMode==="both" && !micOK) coexist=null;
+  if(micMode==="rec" && micOK) stopMic();
+  if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) await setupMeter();
+  else meterOffReason="Voice meter unavailable in this browser";
+  if(!recOn) startRecognition(); else restartRec();
   newGame(mode);
   show("game"); resize();
   if(mode==="practice"){ G.move="mark"; flash("INFLECTION PRACTICE","ok",'Say any command, e.g. "Column right… MARCH!" Watch the meter.'); }
@@ -1261,6 +1401,11 @@ if(DEBUG) $("debug").classList.add("on");
 const dbgSend=()=>{ const v=$("dbgIn").value, p=parseCommand(v); $("heardTxt").textContent=v; if(!p) return flash("NOT A VALID COMMAND","bad",v); judge(p,v,now(),true); $("dbgIn").value=""; };
 $("dbgGo").onclick=dbgSend; $("dbgIn").addEventListener("keydown",e=>{ if(e.key==="Enter") dbgSend(); });
 $("hiStart").textContent=hiScore;
+$("micMode").value=micMode;
+$("micMode").addEventListener("change",()=>{ micMode=$("micMode").value; localStorage.setItem("formation.micMode",micMode); if(micMode==="auto") { coexist=null; localStorage.removeItem("formation.coexist"); } });
+const pb=$("pttBtn");
+pb.addEventListener("pointerdown",pttDown); ["pointerup","pointercancel","pointerleave"].forEach(ev=>pb.addEventListener(ev,pttUp));
+pb.addEventListener("contextmenu",e=>e.preventDefault());
 $("sens").value=settings.sens;                                   // restore saved difficulty (default Recruit)
 $("sens").addEventListener("change",()=>{ settings.sens=$("sens").value; saveSens(settings.sens); });
 fillCadences(); buildReference();
@@ -1276,7 +1421,7 @@ window.FG = {
   state:()=>({move:G.move, tempo:G.tempo, fmode:F.mode, W:F.W, ranks:F.ranks.length, busy:G.busy, over:G.over, score:G.score, posture:G.posture,
              heading:Math.round(((F.mode==="column"?F.path.posAt(F.ranks[0].s).h:0)/D2R%360+360)%360),
              soldiers:allSoldiers().map(s=>[+s.x.toFixed(2),+s.y.toFixed(2),Math.round(((s.face/D2R)%360+360)%360)])}),
-  get G(){return G;}, get F(){return F;}, clock, settings, frames,
+  get G(){return G;}, get F(){return F;}, clock, settings, frames, handleResult, get rec(){return rec;}, get sessionText(){return sessionText;},
   analyse:(id,t)=>{ micOK=true; return analyseInflection(CMD[id], t); }, pushFrame, setFloor:v=>{noiseFloor=v;},
   showAnalysis:a=>{ lastAnalysis=a; },
 };

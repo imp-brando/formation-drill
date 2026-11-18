@@ -232,8 +232,15 @@ async function startMic(){
   const src=actx.createMediaStreamSource(micStream);
   analyser=actx.createAnalyser(); analyser.fftSize=2048; analyser.smoothingTimeConstant=0;
   src.connect(analyser); audioBuf=new Float32Array(analyser.fftSize); micOK=true;
-  setInterval(analyseFrame, 25);
+  clearInterval(frameTimer); frameTimer=setInterval(analyseFrame, 25);
   return true;
+}
+let frameTimer=null;
+/** Release the mic stream (used when the voice meter would starve speech recognition, e.g. Android Chrome). */
+function stopMic(){
+  clearInterval(frameTimer); frameTimer=null; micOK=false;
+  if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
+  analyser=null;
 }
 /** One analysis frame: RMS level (dBFS), level above the noise floor, and pitch (Hz) */
 function analyseFrame(){
@@ -312,7 +319,7 @@ const energyMean = fr => 10*Math.log10(fr.reduce((a,f)=>a+Math.pow(10,f.rel/10),
 
 /** Measure how the command of execution was emphasised. Returns metrics or a reason it couldn't. */
 function measureEmphasis(heardAt){
-  if(!micOK) return {unavailable:"no mic level"};
+  if(!micOK) return {unavailable: meterOffReason || "no mic level", meterOff:true};
   const from=Math.max(heardAt-6000, ttsQuietSince), to=Math.min(now(), heardAt+1000);
   let segs=segmentsBetween(from, to);
   if(!segs.length){
@@ -348,7 +355,9 @@ function analyseInflection(cmd, heardAt){
   if(lvl==="none") return {ok:true, detail:"Commands only: no inflection check"};
   const m=measureEmphasis(heardAt);
   if(m.unavailable){
-    if(lvl==="ds") return {ok:false, reason:"Couldn't hear inflection", hint:"Speak up and pause briefly before the last word ("+m.unavailable+")", ex:m.ex, checks:[]};
+    // Only reject when the meter is running but couldn't measure. If the meter is off (e.g. Android can't
+    // share the mic with speech recognition), commands are accepted on every level.
+    if(lvl==="ds" && !m.meterOff) return {ok:false, reason:"Couldn't hear inflection", hint:"Speak up and pause briefly before the last word ("+m.unavailable+")", ex:m.ex, checks:[]};
     return {ok:true, warn:"Inflection not measured ("+m.unavailable+"), accepted", ex:m.ex};
   }
   const ck=[

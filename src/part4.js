@@ -29,7 +29,7 @@ function newSoldier(){ return {id:soldierId++, x:0,y:0,face:0, px:null,py:null, 
     File index sq: 0 = 1st squad = LEFT file in column (as formed by Right, FACE from line). */
 function makeFormation(x,y,h,W,count){
   const back=dirV(h), path=Path.straight(x-back[0]*300, y-back[1]*300, h);
-  const f={W, rankDist:1, interval:1, path, ranks:[], mode:"column", cc:null};
+  const f={W, rankDist:1, interval:1, path, ranks:[], mode:"column", cc:null, cShift:0, inLine:false, lineTail:0};
   const D=Math.ceil(count/W); let n=0;
   for(let r=0;r<D;r++){ const sol=new Array(W).fill(null); for(let sq=W-1;sq>=0 && n<count;sq--,n++) sol[sq]=newSoldier(); f.ranks.push({s:300-r, sol}); }
   const g=path.segs[0]; for(const rk of f.ranks){ rk.fs=[]; for(let q=0;q<W;q++) rk.fs.push({seg:g, s:rk.s}); }
@@ -55,7 +55,7 @@ function bpm(){
 }
 
 /* ---------- Scheduling: run fn at beat index k ---------- */
-function at(k, fn){ G.sched.push({k,fn}); }
+function at(k, fn, tag){ G.sched.push({k,fn,tag: tag || (typeof schedTag!=="undefined" ? schedTag : null)}); }
 /** Next beat index (>= the next beat to fire) whose foot matches, or the very next beat. */
 function nextBeat(foot){ let k=clock.k; if(foot==="L"||foot==="R"){ while(footOf(k)!==foot) k++; } return k; }
 
@@ -119,7 +119,8 @@ function execute(c, kE){
       const d = (c.id==="colR"||c.id==="colHR")? 1 : -1, ang=(c.id.startsWith("colH")?45:90)*D2R;
       // Square pivot: the corner is placed so the pivot (inside) file reaches ITS pivot point on the
       // action step; every other file marches on to its own pivot point and pivots there.
-      const half=(F.W-1)/2*F.interval, eIn=half*Math.tan(ang/2);
+      const half = d>0 ? laneOf(F.W-1) : -laneOf(0), eIn=half*Math.tan(ang/2);   // distance from the centre line to the pivot file
+      if(schedTag) schedTag.pathLen=F.path.segs.length;
       if(halted||G.move==="mark"){ realignForStepOff(); G.move="forward"; F.path.append(F.ranks[0].s+eIn, [{t:"T",ang,d}]); }
       else { if(G.move==="half") G.move="forward";
         const sAct=F.ranks[0].s + stride*Math.max(0,(k+1)-beatsNow);          // where the front is at the action step
@@ -185,7 +186,7 @@ function animateSpacing(key, val){
 function flankTransform(d){
   const W=F.W, D=F.ranks.length;
   const p0=F.path.posAt(F.ranks[0].s), h=p0.h, dv=dirV(h), nv=nrmV(h);
-  const ideal=(r,sq)=>({x:p0.x-dv[0]*r*F.rankDist+nv[0]*(sq-(W-1)/2)*F.interval, y:p0.y-dv[1]*r*F.rankDist+nv[1]*(sq-(W-1)/2)*F.interval});
+  const ideal=(r,sq)=>({x:p0.x-dv[0]*r*F.rankDist+nv[0]*laneOf(sq), y:p0.y-dv[1]*r*F.rankDist+nv[1]*laneOf(sq)});
   const W2=D, D2=W, h2=h+d*90*D2R;
   const ranks2=[]; for(let r=0;r<D2;r++) ranks2.push({s:0,sol:new Array(W2).fill(null)});
   for(let r=0;r<D;r++) for(let sq=0;sq<W;sq++){
@@ -200,7 +201,10 @@ function flankTransform(d){
   const b=dirV(h2); F.path=Path.straight(cx-b[0]*300, cy-b[1]*300, h2);
   const rd=F.interval, iv=F.rankDist; F.rankDist=rd; F.interval=iv;
   ranks2.forEach((rk,r)=>rk.s=300-r*F.rankDist);
-  F.W=W2; F.ranks=ranks2.filter(rk=>rk.sol.some(Boolean)); F._fi=null; fsAll();
+  F.W=W2; F.ranks=ranks2.filter(rk=>rk.sol.some(Boolean)); F.cShift=0;
+  // squads were files, now they're ranks (or back again). The squads' tail end is where the old rear rank went.
+  F.inLine=!F.inLine; F.lineTail = F.inLine ? (d>0 ? 1 : -1) : 0;
+  F._fi=null; fsAll();
 }
 
 /* ---------- Rear march / about face: the rear rank becomes the front rank ---------- */
@@ -224,6 +228,7 @@ function rearTransform(){
     return {sol, fs, s:0};
   });
   F.path=np; F._fi=null;
+  F.cShift=-(F.cShift||0); F.lineTail=-(F.lineTail||0);    // files reversed: the line's tail end swaps sides
   for(const rk of F.ranks) rk.s=rankS(rk);
   for(const s of allSoldiers()) s.faceAnim={off:-Math.PI,t0:now(),dur:clock.period*.9};
 }
@@ -270,7 +275,7 @@ function finishCounterColumn(){
   for(let sq=0;sq<4;sq++){ const p=cc.paths[sq].posAt(cc.headS[sq]); cx+=p.x/4; cy+=p.y/4; h=p.h; }
   const b=dirV(h); F.path=Path.straight(cx-b[0]*300, cy-b[1]*300, h);
   F.ranks.forEach((rk,r)=>{ let d=0; for(let q=0;q<4;q++) d+=cc.depthQ[q][r]/4; rk.s=300-d; });
-  F._fi=null; fsAll();
+  F.cShift=0; F._fi=null; fsAll();
   for(const s of allSoldiers()) s.trans={x:s.x,y:s.y,t0:now(),dur:clock.period*.6};
   F.mode="column"; F.cc=null; G.busy=null; setStateTag();
 }
@@ -288,7 +293,7 @@ function fallIn(){ newGame(G.mode); flash("FALL IN","ok","Formed in column at at
    doesn't move, which is exactly a pivot in place.
 ====================================================================== */
 const angWrap=a=>{ while(a>Math.PI) a-=2*Math.PI; while(a<=-Math.PI) a+=2*Math.PI; return a; };
-function laneOf(q){ return (q-(F.W-1)/2)*F.interval; }
+function laneOf(q){ return (q-(F.W-1)/2+(F.cShift||0))*F.interval; }   // cShift: lanes off-centre after a file is added to a line
 /** Per-file corner thresholds for the current path (cached until the path changes). */
 function fileInfo(){
   const P=F.path, segs=P.segs, key=segs.length+":"+segs[0].s0+":"+F.W+":"+F.interval+":"+(segs[segs.length-1].s0);
@@ -406,23 +411,46 @@ function spawnRecruit(){
   }
 }
 function addRecruitToFormation(){
+  // In line (after a flank) the squads are ranks: a recruit falls in at the squad's tail, which is the end
+  // file of the line, filled front to back, then a new file opens at that end. In column: rear rank, right first.
+  if(F.inLine){
+    if(F.mode!=="column" || G.busy || !F.ranks.every(rk=>rk.fs.every(onNewestSeg))){ G.pendingRecruits=(G.pendingRecruits||0)+1; return; }   // mid-maneuver: fall in once straight
+    let tq = F.lineTail>0 ? F.W-1 : 0;
+    let rk=F.ranks.find(rk=>!rk.sol[tq]);
+    if(!rk){
+      for(const r of F.ranks){
+        const ref=r.fs[tq], f={seg:ref.seg, s:ref.s};
+        if(F.lineTail>0){ r.sol.push(null); r.fs.push(f); } else { r.sol.unshift(null); r.fs.unshift(f); }
+      }
+      F.W++; F.cShift=(F.cShift||0)+(F.lineTail>0 ? .5 : -.5);       // every existing soldier keeps his lane
+      tq = F.lineTail>0 ? F.W-1 : 0; F._fi=null; rk=F.ranks[0];
+    }
+    const s=newSoldier(); rk.sol[tq]=s; placeRecruit(s, tq, rk); return;
+  }
   const last=F.ranks[F.ranks.length-1], s=newSoldier();
   let empty=-1; for(let sq=F.W-1;sq>=0;sq--) if(!last.sol[sq]){ empty=sq; break; }   // fill from the right file
-  if(empty>=0) last.sol[empty]=s;
+  if(empty>=0){ last.sol[empty]=s; placeRecruit(s, empty, last); }
   else { const sol=new Array(F.W).fill(null); sol[F.W-1]=s;
     const fs=last.fs.map((f,q)=>{ const w=fileWalk(q,f,-F.rankDist); return {seg:w.seg,s:w.s}; });
-    const rk={sol, fs, s:0}; rk.s=rankS(rk); F.ranks.push(rk); }
+    const rk={sol, fs, s:0}; rk.s=rankS(rk); F.ranks.push(rk); placeRecruit(s, F.W-1, rk); }
+}
+/** Put a new soldier straight onto his slot (facing the formation's direction), so nobody straggles. */
+function placeRecruit(s, q, rk){
+  if(!rk.fs || !rk.fs[q]) return;
+  const p=filePos(q, rk.fs[q]); if(!p) return;
+  s.x=p.x; s.y=p.y; s.face=p.h; s.px=null; s.py=null;
 }
 function snakeRules(){
   if(G.mode!=="snake"||G.over) return;
   const sol=allSoldiers();
-  for(const s of sol) if(s.x<0.25||s.x>SNAKE_W-0.25||s.y<0.25||s.y>SNAKE_H-0.25) return broke("You marched into the wall");
+  if(!window.__noWalls) for(const s of sol) if(s.x<0.25||s.x>SNAKE_W-0.25||s.y<0.25||s.y>SNAKE_H-0.25) return broke("You marched into the wall");
   // own formation: front rank vs every rank from the 3rd back (off during maneuvers)
   if(F.mode==="column" && !G.busy && !sol.some(s=>s.trans) && F.ranks.length>2){
     const front=F.ranks[0].sol.filter(Boolean);
     for(let r=2;r<F.ranks.length;r++) for(const b of F.ranks[r].sol) if(b) for(const a of front)
       if(Math.hypot(a.x-b.x,a.y-b.y)<0.55) return broke("You marched into your own formation");
   }
+  if(G.pendingRecruits>0 && F.mode==="column" && !G.busy && F.ranks.every(rk=>rk.fs.every(onNewestSeg))){ G.pendingRecruits--; addRecruitToFormation(); }
   for(let i=G.recruits.length-1;i>=0;i--){
     const rc=G.recruits[i];
     if(sol.some(s=>Math.hypot(s.x-rc.x,s.y-rc.y)<0.7)){

@@ -118,6 +118,12 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
         <option value="exact">Exact words only</option>
       </select>
     </label>
+    <label>Execution timing
+      <select id="execMode" title="Voice burst: the formation moves the instant your MARCH is heard on the voice meter, without waiting for Chrome's text">
+        <option value="burst" selected>Voice burst (fast)</option>
+        <option value="words">Words only</option>
+      </select>
+    </label>
     <label><input type="checkbox" id="tickOn" checked> Step tick</label>
     <label style="flex-basis:100%">Mic
       <select id="micMode">
@@ -620,6 +626,9 @@ function parseExact(text){
 function parsePrepOnly(text){
   const tok=normalizeSpeech(text).split(" ").filter(Boolean);
   if(!tok.length) return null;
+  // "Platoon…" alone: the prep for HALT while marching, ATTENTION at the halt
+  if(tok.length<=2 && tok.every(t=>UNIT_SET.has(t)||FILLER.has(t)) && tok.some(t=>UNIT_SET.has(t)))
+    return (typeof marching==="function" && marching()) ? CMD.halt : CMD.attn;
   for(const cls of ["MARCH","FACE","REST","DRESS","FRONT","RIGHT"]){
     const c=matchPrep(cls, tok.slice(-6));
     if(c && !(cls==="DRESS"||cls==="FACE") ) return c;   // "right"/"left" alone is too ambiguous to wait on
@@ -723,6 +732,7 @@ function pushFrame(t, db, hz){
   frames.push({t, db, rel:db-noiseFloor, hz});
   while(frames.length && frames[0].t<t-8000) frames.shift();
   if(db-noiseFloor>VOICE_REL) lastLoudT=t;
+  if(typeof burstCheck==="function") burstCheck(frames[frames.length-1]);
 }
 const VOICE_REL = 9;                                     // voiced = 9 dB above the noise floor
 const voiceThresh = ()=> noiseFloor+VOICE_REL;           // (absolute dB, for the meter line)
@@ -1126,7 +1136,7 @@ function newSoldier(){ return {id:soldierId++, x:0,y:0,face:0, px:null,py:null, 
     File index sq: 0 = 1st squad = LEFT file in column (as formed by Right, FACE from line). */
 function makeFormation(x,y,h,W,count){
   const back=dirV(h), path=Path.straight(x-back[0]*300, y-back[1]*300, h);
-  const f={W, rankDist:1, interval:1, path, ranks:[], mode:"column", cc:null};
+  const f={W, rankDist:1, interval:1, path, ranks:[], mode:"column", cc:null, cShift:0, inLine:false, lineTail:0};
   const D=Math.ceil(count/W); let n=0;
   for(let r=0;r<D;r++){ const sol=new Array(W).fill(null); for(let sq=W-1;sq>=0 && n<count;sq--,n++) sol[sq]=newSoldier(); f.ranks.push({s:300-r, sol}); }
   const g=path.segs[0]; for(const rk of f.ranks){ rk.fs=[]; for(let q=0;q<W;q++) rk.fs.push({seg:g, s:rk.s}); }
@@ -1152,7 +1162,7 @@ function bpm(){
 }
 
 /* ---------- Scheduling: run fn at beat index k ---------- */
-function at(k, fn){ G.sched.push({k,fn}); }
+function at(k, fn, tag){ G.sched.push({k,fn,tag: tag || (typeof schedTag!=="undefined" ? schedTag : null)}); }
 /** Next beat index (>= the next beat to fire) whose foot matches, or the very next beat. */
 function nextBeat(foot){ let k=clock.k; if(foot==="L"||foot==="R"){ while(footOf(k)!==foot) k++; } return k; }
 
@@ -1216,7 +1226,8 @@ function execute(c, kE){
       const d = (c.id==="colR"||c.id==="colHR")? 1 : -1, ang=(c.id.startsWith("colH")?45:90)*D2R;
       // Square pivot: the corner is placed so the pivot (inside) file reaches ITS pivot point on the
       // action step; every other file marches on to its own pivot point and pivots there.
-      const half=(F.W-1)/2*F.interval, eIn=half*Math.tan(ang/2);
+      const half = d>0 ? laneOf(F.W-1) : -laneOf(0), eIn=half*Math.tan(ang/2);   // distance from the centre line to the pivot file
+      if(schedTag) schedTag.pathLen=F.path.segs.length;
       if(halted||G.move==="mark"){ realignForStepOff(); G.move="forward"; F.path.append(F.ranks[0].s+eIn, [{t:"T",ang,d}]); }
       else { if(G.move==="half") G.move="forward";
         const sAct=F.ranks[0].s + stride*Math.max(0,(k+1)-beatsNow);          // where the front is at the action step
@@ -1282,7 +1293,7 @@ function animateSpacing(key, val){
 function flankTransform(d){
   const W=F.W, D=F.ranks.length;
   const p0=F.path.posAt(F.ranks[0].s), h=p0.h, dv=dirV(h), nv=nrmV(h);
-  const ideal=(r,sq)=>({x:p0.x-dv[0]*r*F.rankDist+nv[0]*(sq-(W-1)/2)*F.interval, y:p0.y-dv[1]*r*F.rankDist+nv[1]*(sq-(W-1)/2)*F.interval});
+  const ideal=(r,sq)=>({x:p0.x-dv[0]*r*F.rankDist+nv[0]*laneOf(sq), y:p0.y-dv[1]*r*F.rankDist+nv[1]*laneOf(sq)});
   const W2=D, D2=W, h2=h+d*90*D2R;
   const ranks2=[]; for(let r=0;r<D2;r++) ranks2.push({s:0,sol:new Array(W2).fill(null)});
   for(let r=0;r<D;r++) for(let sq=0;sq<W;sq++){
@@ -1297,7 +1308,10 @@ function flankTransform(d){
   const b=dirV(h2); F.path=Path.straight(cx-b[0]*300, cy-b[1]*300, h2);
   const rd=F.interval, iv=F.rankDist; F.rankDist=rd; F.interval=iv;
   ranks2.forEach((rk,r)=>rk.s=300-r*F.rankDist);
-  F.W=W2; F.ranks=ranks2.filter(rk=>rk.sol.some(Boolean)); F._fi=null; fsAll();
+  F.W=W2; F.ranks=ranks2.filter(rk=>rk.sol.some(Boolean)); F.cShift=0;
+  // squads were files, now they're ranks (or back again). The squads' tail end is where the old rear rank went.
+  F.inLine=!F.inLine; F.lineTail = F.inLine ? (d>0 ? 1 : -1) : 0;
+  F._fi=null; fsAll();
 }
 
 /* ---------- Rear march / about face: the rear rank becomes the front rank ---------- */
@@ -1321,6 +1335,7 @@ function rearTransform(){
     return {sol, fs, s:0};
   });
   F.path=np; F._fi=null;
+  F.cShift=-(F.cShift||0); F.lineTail=-(F.lineTail||0);    // files reversed: the line's tail end swaps sides
   for(const rk of F.ranks) rk.s=rankS(rk);
   for(const s of allSoldiers()) s.faceAnim={off:-Math.PI,t0:now(),dur:clock.period*.9};
 }
@@ -1367,7 +1382,7 @@ function finishCounterColumn(){
   for(let sq=0;sq<4;sq++){ const p=cc.paths[sq].posAt(cc.headS[sq]); cx+=p.x/4; cy+=p.y/4; h=p.h; }
   const b=dirV(h); F.path=Path.straight(cx-b[0]*300, cy-b[1]*300, h);
   F.ranks.forEach((rk,r)=>{ let d=0; for(let q=0;q<4;q++) d+=cc.depthQ[q][r]/4; rk.s=300-d; });
-  F._fi=null; fsAll();
+  F.cShift=0; F._fi=null; fsAll();
   for(const s of allSoldiers()) s.trans={x:s.x,y:s.y,t0:now(),dur:clock.period*.6};
   F.mode="column"; F.cc=null; G.busy=null; setStateTag();
 }
@@ -1385,7 +1400,7 @@ function fallIn(){ newGame(G.mode); flash("FALL IN","ok","Formed in column at at
    doesn't move, which is exactly a pivot in place.
 ====================================================================== */
 const angWrap=a=>{ while(a>Math.PI) a-=2*Math.PI; while(a<=-Math.PI) a+=2*Math.PI; return a; };
-function laneOf(q){ return (q-(F.W-1)/2)*F.interval; }
+function laneOf(q){ return (q-(F.W-1)/2+(F.cShift||0))*F.interval; }   // cShift: lanes off-centre after a file is added to a line
 /** Per-file corner thresholds for the current path (cached until the path changes). */
 function fileInfo(){
   const P=F.path, segs=P.segs, key=segs.length+":"+segs[0].s0+":"+F.W+":"+F.interval+":"+(segs[segs.length-1].s0);
@@ -1503,23 +1518,46 @@ function spawnRecruit(){
   }
 }
 function addRecruitToFormation(){
+  // In line (after a flank) the squads are ranks: a recruit falls in at the squad's tail, which is the end
+  // file of the line, filled front to back, then a new file opens at that end. In column: rear rank, right first.
+  if(F.inLine){
+    if(F.mode!=="column" || G.busy || !F.ranks.every(rk=>rk.fs.every(onNewestSeg))){ G.pendingRecruits=(G.pendingRecruits||0)+1; return; }   // mid-maneuver: fall in once straight
+    let tq = F.lineTail>0 ? F.W-1 : 0;
+    let rk=F.ranks.find(rk=>!rk.sol[tq]);
+    if(!rk){
+      for(const r of F.ranks){
+        const ref=r.fs[tq], f={seg:ref.seg, s:ref.s};
+        if(F.lineTail>0){ r.sol.push(null); r.fs.push(f); } else { r.sol.unshift(null); r.fs.unshift(f); }
+      }
+      F.W++; F.cShift=(F.cShift||0)+(F.lineTail>0 ? .5 : -.5);       // every existing soldier keeps his lane
+      tq = F.lineTail>0 ? F.W-1 : 0; F._fi=null; rk=F.ranks[0];
+    }
+    const s=newSoldier(); rk.sol[tq]=s; placeRecruit(s, tq, rk); return;
+  }
   const last=F.ranks[F.ranks.length-1], s=newSoldier();
   let empty=-1; for(let sq=F.W-1;sq>=0;sq--) if(!last.sol[sq]){ empty=sq; break; }   // fill from the right file
-  if(empty>=0) last.sol[empty]=s;
+  if(empty>=0){ last.sol[empty]=s; placeRecruit(s, empty, last); }
   else { const sol=new Array(F.W).fill(null); sol[F.W-1]=s;
     const fs=last.fs.map((f,q)=>{ const w=fileWalk(q,f,-F.rankDist); return {seg:w.seg,s:w.s}; });
-    const rk={sol, fs, s:0}; rk.s=rankS(rk); F.ranks.push(rk); }
+    const rk={sol, fs, s:0}; rk.s=rankS(rk); F.ranks.push(rk); placeRecruit(s, F.W-1, rk); }
+}
+/** Put a new soldier straight onto his slot (facing the formation's direction), so nobody straggles. */
+function placeRecruit(s, q, rk){
+  if(!rk.fs || !rk.fs[q]) return;
+  const p=filePos(q, rk.fs[q]); if(!p) return;
+  s.x=p.x; s.y=p.y; s.face=p.h; s.px=null; s.py=null;
 }
 function snakeRules(){
   if(G.mode!=="snake"||G.over) return;
   const sol=allSoldiers();
-  for(const s of sol) if(s.x<0.25||s.x>SNAKE_W-0.25||s.y<0.25||s.y>SNAKE_H-0.25) return broke("You marched into the wall");
+  if(!window.__noWalls) for(const s of sol) if(s.x<0.25||s.x>SNAKE_W-0.25||s.y<0.25||s.y>SNAKE_H-0.25) return broke("You marched into the wall");
   // own formation: front rank vs every rank from the 3rd back (off during maneuvers)
   if(F.mode==="column" && !G.busy && !sol.some(s=>s.trans) && F.ranks.length>2){
     const front=F.ranks[0].sol.filter(Boolean);
     for(let r=2;r<F.ranks.length;r++) for(const b of F.ranks[r].sol) if(b) for(const a of front)
       if(Math.hypot(a.x-b.x,a.y-b.y)<0.55) return broke("You marched into your own formation");
   }
+  if(G.pendingRecruits>0 && F.mode==="column" && !G.busy && F.ranks.every(rk=>rk.fs.every(onNewestSeg))){ G.pendingRecruits--; addRecruitToFormation(); }
   for(let i=G.recruits.length-1;i>=0;i--){
     const rc=G.recruits[i];
     if(sol.some(s=>Math.hypot(s.x-rc.x,s.y-rc.y)<0.7)){
@@ -1705,7 +1743,7 @@ function makeRec(){
 function startRecognition(){
   if(!SR){ setStatus("Speech recognition isn't supported in this browser. Use Chrome on Android.","bad"); return false; }
   recOn=true; restartRec();
-  clearInterval(watchdogTimer); watchdogTimer=setInterval(()=>{ if(recOn && !recRunning && !ptt && now()-lastRecStart>2500) restartRec(); }, 1500);
+  clearInterval(watchdogTimer); watchdogTimer=setInterval(()=>{ if(recOn && !recRunning && !ptt && !burstHold && now()-lastRecStart>2500) restartRec(); }, 1500);
   return true;
 }
 function restartRec(){
@@ -1713,7 +1751,7 @@ function restartRec(){
   recRunning=false; rec=makeRec();
   try{ rec.start(); lastRecStart=now(); }catch(_){ scheduleRestart(250); }
 }
-function scheduleRestart(ms){ clearTimeout(restartTimer); restartTimer=setTimeout(()=>{ if(recOn && !recRunning && !ptt) restartRec(); }, ms); }
+function scheduleRestart(ms){ clearTimeout(restartTimer); restartTimer=setTimeout(()=>{ if(recOn && !recRunning && !ptt && !burstHold) restartRec(); }, ms); }
 
 let pendingPrep=null;                 // {text, t}: a prep heard without its execution word yet
 const consumedText=new Map();          // result key -> transcript already turned into a command
@@ -1754,17 +1792,21 @@ function handleResult(e){
         if(p && (!hit || p.score>hit.p.score+1e-9)) hit={p, raw:(pass===0?"":pend+" … ")+res[a].transcript.trim(), n};
       }
     }
+    if(burstTranscript(hit&&hit.p.cmd, hit? hit.raw : firstFresh, res.isFinal)){ consumedText.set(key, normText(res[0].transcript)); sessionText=normText(res[0].transcript); continue; }
     if(hit){
-      consumedText.set(key, hit.n); sessionText=hit.n; pendingPrep=null;
+      consumedText.set(key, hit.n); sessionText=hit.n; pendingPrep=null; if(armed) disarm("command");
       $("heardTxt").textContent=hit.raw; $("heard").className="";
       const how = hit.p.via==="sound-alike" ? " (sound-alike)" : hit.p.via==="your voice" ? " (your voice)" : "";
       setStatus(`Heard "${hit.raw}" → understood as ${hit.p.cmd.name.toUpperCase()}${how}`, "ok", 4000);
       onCommandHeard(hit.p, hit.raw); triggerProbe=true;
+    } else if(!res.isFinal && firstFresh && sharedMic()){
+      const prep=parsePrepOnly(firstFresh) || (settings.clarity!=="exact" && fuzzyPrepOnly(firstFresh));
+      if(prep && armBurst(prep, top, false)) picaaPrep();
     } else if(res.isFinal && firstFresh){
       triggerProbe=true;
       const prep=parsePrepOnly(firstFresh) || (settings.clarity!=="exact" && fuzzyPrepOnly(firstFresh));
       if(prep){
-        pendingPrep={text:firstFresh, t:now()}; picaaPrep();
+        pendingPrep={text:firstFresh, t:now()}; picaaPrep(); armBurst(prep, top, true);
         setStatus(`Heard "${top}" → understood as ${prep.name.split(",")[0].toUpperCase()}… waiting for ${prep.exec}`, "ok", 3500);
       } else {
         // not a drill command: discard quietly (no flash, no penalty)
@@ -1779,6 +1821,7 @@ function handleResult(e){
 
 /* ---------- Game over: stop listening completely (mic indicator off) until the user taps ---------- */
 function stopListening(why){
+  armed=null; burstHold=false;
   recOn=false; ptt=false; pendingPrep=null; pendingProbe=false; probe=null;
   clearTimeout(restartTimer); clearInterval(watchdogTimer);
   try{ if(rec){ rec.onend=null; rec.onresult=null; rec.abort(); } }catch(_){}
@@ -1873,17 +1916,18 @@ function judge(p, raw, heardAt, typed){
   // Executed on the next beat; foot-specific commands wait for the correct foot while marching.
   // PICAA: anchor the command of execution to the foot strike it was called on, then one additional
   // step, then the action step. If it wasn't on the correct foot, use the next correct-foot strike.
-  const kE=anchorBeat(c, a, heardAt);
-  const run=()=>{ if(!canExecute(c) || c.id==="fallin") execute(c, kE); };
-  if(kE<clock.k) run(); else at(kE, run);
+  const kE=anchorBeat(c, a, heardAt, p);
+  const tag = p.tag || null;
+  const run=()=>{ if(tag&&tag.cancelled) return; schedTag=tag; try{ if(!canExecute(c) || c.id==="fallin") execute(c, kE); } finally{ schedTag=null; } if(tag) tag.ran=true; };
+  if(kE<clock.k) run(); else at(kE, run, tag);
   reportVerdict(c, a, fc);
 }
 /* When was the command of execution actually spoken? From the voice meter if it's on, otherwise
    the recognition time minus Chrome's typical interim-result delay. */
 const EST_REC_LAT=250;
-function anchorBeat(c, a, heardAt){
+function anchorBeat(c, a, heardAt, p){
   if(!marching() || G.move==="mark") return clock.k;                 // from the halt / mark time: next strike
-  const spokenT = (a && a.ex && a.ex.peakT) ? a.ex.peakT : heardAt-EST_REC_LAT;
+  const spokenT = (p && p.onsetT!==undefined) ? p.onsetT : (a && a.ex && a.ex.peakT) ? a.ex.peakT : heardAt-EST_REC_LAT;
   const kS = footAtTime(spokenT).k;
   if(c.foot==="L"||c.foot==="R"){
     if(footOf(kS)===c.foot && kS>=clock.k-1) return kS;              // called on the correct foot
@@ -1908,6 +1952,113 @@ function reportVerdict(c,a,fc){
     el.className="bad"; el.textContent = a.reason.toUpperCase()+": "+c.name;
     $("detail").textContent = (a.hint? a.hint+" " : "") + (a.detail||""); chime(false);
   }
+}
+/* ======================================================================
+   OPTION A: VOICE-BURST EXECUTION TIMING
+   Chrome recognises the preparatory command ("Column left…") during the natural pause. The game
+   then ARMS and the command of execution is the first sharp loudness burst on the local voice meter:
+   no waiting for Chrome to turn "MARCH" into text. PICAA is anchored to the burst onset.
+   Guards: a prep first; a quiet gap (>=150 ms) after it; a rise >=12 dB above the noise floor;
+   >=50 ms sustained (a click doesn't count); inside the 3.5 s window. Chrome's later transcript only
+   confirms (no double execution) or cancels ("as you were", or no execution word) if the action
+   step hasn't happened yet.
+   Mic: if the meter and recognition can share the mic (desktop, or an Android phone that passed the
+   sharing check) both run. Otherwise on Android the game SWITCHES: Android ends the recognition
+   session at the pause after the prep, so the meter takes the mic for the execution word, then hands
+   it back. If the meter never hears anything twice in a row, the game falls back to words only.
+====================================================================== */
+const laterQ=[]; function later(ms,fn){ laterQ.push({t:now()+ms,fn}); }
+function runLater(t){ for(let i=0;i<laterQ.length;i++) if(laterQ[i].t<=t){ const f=laterQ.splice(i--,1)[0]; f.fn(); } }
+let execMode = ["burst","words"].includes(localStorage.getItem("formation.execMode")) ? localStorage.getItem("formation.execMode") : "burst";
+const BURST={gapMs:150, riseDb:12, confirmMs:50, windowMs:PREP_WAIT_MS, confirmWindowMs:2500};
+let armed=null, lastBurst=null, burstHold=false, switchMisses=0, schedTag=null;
+function burstAvailable(){ return execMode==="burst" && micMode!=="rec" && !!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia) && !G.over && G.mode!=="practice"; }
+function sharedMic(){ return micOK && (!IS_ANDROID || coexist==="yes" || micMode==="both"); }
+/** A prep was recognised: arm for the voice burst. isFinal: Chrome finished the result (the session has paused). */
+async function armBurst(cmd, prepText, isFinal){
+  if(window.__armLog) window.__armLog.push({t:Math.round(now()), id:cmd.id, avail:burstAvailable(), shared:sharedMic(), isFinal, micOK, armed:!!armed, hold:burstHold});
+  if(!burstAvailable() || cmd.single) return false;
+  if(armed && armed.cmd===cmd) return true;
+  const t=now();
+  if(sharedMic()){
+    armed={cmd, prepText, t, src:"shared", quietSince: now()-lastLoudT>=BURST.gapMs ? lastLoudT : null, on:null};
+  } else if(IS_ANDROID && isFinal){
+    // switch the mic over to the meter for the execution word
+    burstHold=true; clearTimeout(restartTimer);
+    try{ if(rec){ rec.onend=null; rec.abort(); } }catch(_){}
+    recRunning=false;
+    armed={cmd, prepText, t, src:"switch", quietSince:t-BURST.gapMs, on:null, heard:0};   // Chrome only ends the session after silence
+    const ok = micOK || await startMic();
+    if(!ok || !armed){ endSwitch(); armed=null; return false; }
+    armed.meterT=now();
+  } else return false;
+  const a=armed; later(BURST.windowMs, ()=>{ if(armed===a){ disarm("window"); } });
+  setStatus(`Heard "${prepText}" → understood as ${cmd.name.split(",")[0].toUpperCase()}… call ${cmd.exec} (voice burst${armed.src==="switch"?", mic switched":""})`, "ok", BURST.windowMs);
+  return true;
+}
+function disarm(why){
+  if(window.__armLog) window.__armLog.push({disarm:why, had:!!armed, t:Math.round(now())});
+  const a=armed; armed=null; if(!a) return;
+  if(a.src==="switch"){
+    if(why==="window" && !a.heard){ if(++switchMisses>=2){ execMode="words"; setStatus("Voice burst off: this phone gives the meter no sound while switching. Using words only.","warn",4000); } }
+    endSwitch();
+  }
+}
+function endSwitch(){ if(!burstHold) return; burstHold=false; if(!(coexist==="yes")) stopMic(); if(recOn) restartRec(); }
+/** Called for every meter frame (~25 ms). */
+function burstCheck(f){
+  const a=armed; if(!a || f.t<a.t-400) return;
+  const loud = f.rel>VOICE_REL;
+  if(a.src==="switch" && f.rel>3) a.heard++;
+  if(!loud){
+    if(a.on){ a.on=null; }                                    // a blip, not a word
+    if(a.quietSince===null) a.quietSince=f.t;
+    return;
+  }
+  if(a.quietSince===null || f.t-a.quietSince<BURST.gapMs){ a.quietSince=null; return; }   // still talking: no gap yet
+  if(!a.on) a.on={t0:f.t, peak:f.rel};
+  a.on.peak=Math.max(a.on.peak, f.rel);
+  if(f.t-a.on.t0>=BURST.confirmMs && a.on.peak>=BURST.riseDb) fireBurst(a, a.on.t0);
+}
+function fireBurst(a, t0){
+  if(window.__armLog) window.__armLog.push({fire:a.cmd.id, t:Math.round(now())});
+  armed=null; switchMisses=0;
+  const tag={cancelled:false, ran:false};
+  const p={cmd:a.cmd, prep:a.prepText, onsetT:t0, via:"voice burst", tag, score:1};
+  lastBurst={id:a.cmd.id, t:now(), onsetT:t0, tag, prepText:a.prepText, src:a.src};
+  lastCmdT=now(); pendingPrep = pendingPrep || {text:a.prepText, t:now()};   // so "march" alone can confirm
+  if(window.__burstLog) window.__burstLog.push({id:a.cmd.id, onsetT:t0, firedT:now()});
+  // judge on the opening of the execution word (inflection needs a little of it), anchored to the onset
+  later(Math.max(0, t0+160-now()), ()=>{ if(!tag.cancelled) judge(p, a.prepText+" … (voice burst)", now(), false); });
+  setStatus(`Heard "${a.prepText}" + voice burst → ${a.cmd.name.toUpperCase()}`, "ok", 4000);
+  if(a.src==="switch") watchSwitchEnd();
+}
+function watchSwitchEnd(){ const t0=now(); const chk=()=>{ if(now()-lastLoudT>200 || now()-t0>1200) endSwitch(); else later(50,chk); }; later(120,chk); }
+/** Cancel a burst-triggered command if its action step hasn't happened yet. */
+function cancelBurst(reason){
+  const b=lastBurst; if(!b || b.tag.cancelled) return false;
+  const pa=G.pendingAction;
+  if(b.tag.ran && pa && pa.actT) return false;              // too late: the action step already happened
+  b.tag.cancelled=true; G.sched=G.sched.filter(x=>x.tag!==b.tag);
+  if(b.tag.ran){
+    if(b.tag.pathLen!==undefined && F.path.segs.length>b.tag.pathLen){ F.path.segs.length=b.tag.pathLen; F._fi=null; }
+    G.busy=null; G.pendingAction=null;
+  }
+  picaaSet(["","","","",""]); lastBurst=null;
+  flash("AS YOU WERE","warn",reason); setStatus("Cancelled: "+reason, "warn", 3000);
+  return true;
+}
+/** Chrome's transcript after a burst: confirm, or cancel. Returns true if the result was handled. */
+function burstTranscript(hitCmd, fresh, isFinal){
+  const b=lastBurst; if(!b || now()-b.t>BURST.confirmWindowMs) return false;
+  const n=normalizeSpeech(fresh||"");
+  if(/\bas you were\b/.test(n)) return cancelBurst('Heard "as you were"'), true;
+  if(hitCmd){ if(hitCmd.id===b.id){ setStatus(`Confirmed by Chrome: "${fresh}" → ${hitCmd.name.toUpperCase()}`, "ok", 3000); lastBurst=null; pendingPrep=null; return true; } return false; }
+  if(!isFinal || !n) return false;
+  const prepEcho = parsePrepOnly(n) || fuzzyPrepOnly(n);
+  if(prepEcho && prepEcho.id===b.id) return true;            // Chrome caught up on the prep: nothing new
+  if(!hasExecWord(n)){ cancelBurst(`Chrome heard "${fresh}", not ${b.id==="halt"?"HALT":"an execution word"}`); return true; }
+  return false;
 }
 /* ---------- PICAA beat indicator: Prep · Interval · Command · Additional step · Action step ---------- */
 function picaaSet(st){ const el=$("picaa"); if(!el) return; [...el.querySelectorAll("b")].forEach((sp,i)=>sp.className=st[i]||""); el.classList.toggle("show", st.some(Boolean)); }
@@ -2004,6 +2155,7 @@ function step(t){
   clock.period=60000/bpm();
   if(t-clock.nextT>1000) clock.nextT=t;                     // resync after the tab was hidden
   while(t>=clock.nextT){ clock.lastT=clock.nextT; const k=clock.k++; clock.nextT+=clock.period; onBeat(k); }
+  runLater(t);
   const dtBeats=dt/clock.period;
   if(G.mode!=="practice") advance(dtBeats);
   layoutSoldiers(dtBeats,false);
@@ -2035,6 +2187,8 @@ async function begin(mode){
 /* ---------- Wire up the UI ---------- */
 document.querySelectorAll("[data-mode]").forEach(b=>b.addEventListener("click",()=>begin(b.dataset.mode)));
 $("btnRef").onclick=()=>show("ref"); $("refBack").onclick=()=>show("start");
+$("execMode").value=execMode;
+$("execMode").addEventListener("change",()=>{ execMode=$("execMode").value; localStorage.setItem("formation.execMode",execMode); switchMisses=0; });
 $("clarity").value=settings.clarity;
 $("clarity").addEventListener("change",()=>{ settings.clarity=$("clarity").value; localStorage.setItem("formation.clarity",settings.clarity); });
 
@@ -2122,6 +2276,11 @@ window.FG = {
              soldiers:allSoldiers().map(s=>[+s.x.toFixed(2),+s.y.toFixed(2),Math.round(((s.face/D2R)%360+360)%360)])}),
   setRecOn(v){ recOn=v; },
   now(){ return now(); },
+  addRecruit(){ addRecruitToFormation(); },
+  frame(db,hz){ pushFrame(now(), db, hz||0); },                  // feed the voice meter (tests)
+  meter(on){ micOK=on; if(on) noiseFloor=-60; },
+  burst:()=>({armed: armed && {id:armed.cmd.id, src:armed.src}, last: lastBurst && {id:lastBurst.id, onsetT:lastBurst.onsetT}, execMode}),
+  setExecMode(m){ execMode=m; },
   get G(){return G;}, get F(){return F;}, clock, settings, frames, handleResult, get rec(){return rec;}, get sessionText(){return sessionText;},
   analyse:(id,t)=>{ micOK=true; return analyseInflection(CMD[id], t); }, pushFrame, setFloor:v=>{noiseFloor=v;},
   showAnalysis:a=>{ lastAnalysis=a; },

@@ -330,6 +330,9 @@ function parseExact(text){
 function parsePrepOnly(text){
   const tok=normalizeSpeech(text).split(" ").filter(Boolean);
   if(!tok.length) return null;
+  // "Platoon…" alone: the prep for HALT while marching, ATTENTION at the halt
+  if(tok.length<=2 && tok.every(t=>UNIT_SET.has(t)||FILLER.has(t)) && tok.some(t=>UNIT_SET.has(t)))
+    return (typeof marching==="function" && marching()) ? CMD.halt : CMD.attn;
   for(const cls of ["MARCH","FACE","REST","DRESS","FRONT","RIGHT"]){
     const c=matchPrep(cls, tok.slice(-6));
     if(c && !(cls==="DRESS"||cls==="FACE") ) return c;   // "right"/"left" alone is too ambiguous to wait on
@@ -433,6 +436,7 @@ function pushFrame(t, db, hz){
   frames.push({t, db, rel:db-noiseFloor, hz});
   while(frames.length && frames[0].t<t-8000) frames.shift();
   if(db-noiseFloor>VOICE_REL) lastLoudT=t;
+  if(typeof burstCheck==="function") burstCheck(frames[frames.length-1]);
 }
 const VOICE_REL = 9;                                     // voiced = 9 dB above the noise floor
 const voiceThresh = ()=> noiseFloor+VOICE_REL;           // (absolute dB, for the meter line)

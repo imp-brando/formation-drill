@@ -118,6 +118,12 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
         <option value="exact">Exact words only</option>
       </select>
     </label>
+    <label>Execution timing
+      <select id="execMode" title="Voice burst: the formation moves the instant your MARCH is heard on the voice meter, without waiting for Chrome's text">
+        <option value="burst" selected>Voice burst (fast)</option>
+        <option value="words">Words only</option>
+      </select>
+    </label>
     <label><input type="checkbox" id="tickOn" checked> Step tick</label>
     <label style="flex-basis:100%">Mic
       <select id="micMode">

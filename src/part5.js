@@ -169,7 +169,7 @@ function makeRec(){
 function startRecognition(){
   if(!SR){ setStatus("Speech recognition isn't supported in this browser. Use Chrome on Android.","bad"); return false; }
   recOn=true; restartRec();
-  clearInterval(watchdogTimer); watchdogTimer=setInterval(()=>{ if(recOn && !recRunning && !ptt && now()-lastRecStart>2500) restartRec(); }, 1500);
+  clearInterval(watchdogTimer); watchdogTimer=setInterval(()=>{ if(recOn && !recRunning && !ptt && !burstHold && now()-lastRecStart>2500) restartRec(); }, 1500);
   return true;
 }
 function restartRec(){
@@ -177,7 +177,7 @@ function restartRec(){
   recRunning=false; rec=makeRec();
   try{ rec.start(); lastRecStart=now(); }catch(_){ scheduleRestart(250); }
 }
-function scheduleRestart(ms){ clearTimeout(restartTimer); restartTimer=setTimeout(()=>{ if(recOn && !recRunning && !ptt) restartRec(); }, ms); }
+function scheduleRestart(ms){ clearTimeout(restartTimer); restartTimer=setTimeout(()=>{ if(recOn && !recRunning && !ptt && !burstHold) restartRec(); }, ms); }
 
 let pendingPrep=null;                 // {text, t}: a prep heard without its execution word yet
 const consumedText=new Map();          // result key -> transcript already turned into a command
@@ -218,17 +218,21 @@ function handleResult(e){
         if(p && (!hit || p.score>hit.p.score+1e-9)) hit={p, raw:(pass===0?"":pend+" … ")+res[a].transcript.trim(), n};
       }
     }
+    if(burstTranscript(hit&&hit.p.cmd, hit? hit.raw : firstFresh, res.isFinal)){ consumedText.set(key, normText(res[0].transcript)); sessionText=normText(res[0].transcript); continue; }
     if(hit){
-      consumedText.set(key, hit.n); sessionText=hit.n; pendingPrep=null;
+      consumedText.set(key, hit.n); sessionText=hit.n; pendingPrep=null; if(armed) disarm("command");
       $("heardTxt").textContent=hit.raw; $("heard").className="";
       const how = hit.p.via==="sound-alike" ? " (sound-alike)" : hit.p.via==="your voice" ? " (your voice)" : "";
       setStatus(`Heard "${hit.raw}" → understood as ${hit.p.cmd.name.toUpperCase()}${how}`, "ok", 4000);
       onCommandHeard(hit.p, hit.raw); triggerProbe=true;
+    } else if(!res.isFinal && firstFresh && sharedMic()){
+      const prep=parsePrepOnly(firstFresh) || (settings.clarity!=="exact" && fuzzyPrepOnly(firstFresh));
+      if(prep && armBurst(prep, top, false)) picaaPrep();
     } else if(res.isFinal && firstFresh){
       triggerProbe=true;
       const prep=parsePrepOnly(firstFresh) || (settings.clarity!=="exact" && fuzzyPrepOnly(firstFresh));
       if(prep){
-        pendingPrep={text:firstFresh, t:now()}; picaaPrep();
+        pendingPrep={text:firstFresh, t:now()}; picaaPrep(); armBurst(prep, top, true);
         setStatus(`Heard "${top}" → understood as ${prep.name.split(",")[0].toUpperCase()}… waiting for ${prep.exec}`, "ok", 3500);
       } else {
         // not a drill command: discard quietly (no flash, no penalty)
@@ -243,6 +247,7 @@ function handleResult(e){
 
 /* ---------- Game over: stop listening completely (mic indicator off) until the user taps ---------- */
 function stopListening(why){
+  armed=null; burstHold=false;
   recOn=false; ptt=false; pendingPrep=null; pendingProbe=false; probe=null;
   clearTimeout(restartTimer); clearInterval(watchdogTimer);
   try{ if(rec){ rec.onend=null; rec.onresult=null; rec.abort(); } }catch(_){}
@@ -337,17 +342,18 @@ function judge(p, raw, heardAt, typed){
   // Executed on the next beat; foot-specific commands wait for the correct foot while marching.
   // PICAA: anchor the command of execution to the foot strike it was called on, then one additional
   // step, then the action step. If it wasn't on the correct foot, use the next correct-foot strike.
-  const kE=anchorBeat(c, a, heardAt);
-  const run=()=>{ if(!canExecute(c) || c.id==="fallin") execute(c, kE); };
-  if(kE<clock.k) run(); else at(kE, run);
+  const kE=anchorBeat(c, a, heardAt, p);
+  const tag = p.tag || null;
+  const run=()=>{ if(tag&&tag.cancelled) return; schedTag=tag; try{ if(!canExecute(c) || c.id==="fallin") execute(c, kE); } finally{ schedTag=null; } if(tag) tag.ran=true; };
+  if(kE<clock.k) run(); else at(kE, run, tag);
   reportVerdict(c, a, fc);
 }
 /* When was the command of execution actually spoken? From the voice meter if it's on, otherwise
    the recognition time minus Chrome's typical interim-result delay. */
 const EST_REC_LAT=250;
-function anchorBeat(c, a, heardAt){
+function anchorBeat(c, a, heardAt, p){
   if(!marching() || G.move==="mark") return clock.k;                 // from the halt / mark time: next strike
-  const spokenT = (a && a.ex && a.ex.peakT) ? a.ex.peakT : heardAt-EST_REC_LAT;
+  const spokenT = (p && p.onsetT!==undefined) ? p.onsetT : (a && a.ex && a.ex.peakT) ? a.ex.peakT : heardAt-EST_REC_LAT;
   const kS = footAtTime(spokenT).k;
   if(c.foot==="L"||c.foot==="R"){
     if(footOf(kS)===c.foot && kS>=clock.k-1) return kS;              // called on the correct foot
@@ -372,6 +378,113 @@ function reportVerdict(c,a,fc){
     el.className="bad"; el.textContent = a.reason.toUpperCase()+": "+c.name;
     $("detail").textContent = (a.hint? a.hint+" " : "") + (a.detail||""); chime(false);
   }
+}
+/* ======================================================================
+   OPTION A: VOICE-BURST EXECUTION TIMING
+   Chrome recognises the preparatory command ("Column left…") during the natural pause. The game
+   then ARMS and the command of execution is the first sharp loudness burst on the local voice meter:
+   no waiting for Chrome to turn "MARCH" into text. PICAA is anchored to the burst onset.
+   Guards: a prep first; a quiet gap (>=150 ms) after it; a rise >=12 dB above the noise floor;
+   >=50 ms sustained (a click doesn't count); inside the 3.5 s window. Chrome's later transcript only
+   confirms (no double execution) or cancels ("as you were", or no execution word) if the action
+   step hasn't happened yet.
+   Mic: if the meter and recognition can share the mic (desktop, or an Android phone that passed the
+   sharing check) both run. Otherwise on Android the game SWITCHES: Android ends the recognition
+   session at the pause after the prep, so the meter takes the mic for the execution word, then hands
+   it back. If the meter never hears anything twice in a row, the game falls back to words only.
+====================================================================== */
+const laterQ=[]; function later(ms,fn){ laterQ.push({t:now()+ms,fn}); }
+function runLater(t){ for(let i=0;i<laterQ.length;i++) if(laterQ[i].t<=t){ const f=laterQ.splice(i--,1)[0]; f.fn(); } }
+let execMode = ["burst","words"].includes(localStorage.getItem("formation.execMode")) ? localStorage.getItem("formation.execMode") : "burst";
+const BURST={gapMs:150, riseDb:12, confirmMs:50, windowMs:PREP_WAIT_MS, confirmWindowMs:2500};
+let armed=null, lastBurst=null, burstHold=false, switchMisses=0, schedTag=null;
+function burstAvailable(){ return execMode==="burst" && micMode!=="rec" && !!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia) && !G.over && G.mode!=="practice"; }
+function sharedMic(){ return micOK && (!IS_ANDROID || coexist==="yes" || micMode==="both"); }
+/** A prep was recognised: arm for the voice burst. isFinal: Chrome finished the result (the session has paused). */
+async function armBurst(cmd, prepText, isFinal){
+  if(window.__armLog) window.__armLog.push({t:Math.round(now()), id:cmd.id, avail:burstAvailable(), shared:sharedMic(), isFinal, micOK, armed:!!armed, hold:burstHold});
+  if(!burstAvailable() || cmd.single) return false;
+  if(armed && armed.cmd===cmd) return true;
+  const t=now();
+  if(sharedMic()){
+    armed={cmd, prepText, t, src:"shared", quietSince: now()-lastLoudT>=BURST.gapMs ? lastLoudT : null, on:null};
+  } else if(IS_ANDROID && isFinal){
+    // switch the mic over to the meter for the execution word
+    burstHold=true; clearTimeout(restartTimer);
+    try{ if(rec){ rec.onend=null; rec.abort(); } }catch(_){}
+    recRunning=false;
+    armed={cmd, prepText, t, src:"switch", quietSince:t-BURST.gapMs, on:null, heard:0};   // Chrome only ends the session after silence
+    const ok = micOK || await startMic();
+    if(!ok || !armed){ endSwitch(); armed=null; return false; }
+    armed.meterT=now();
+  } else return false;
+  const a=armed; later(BURST.windowMs, ()=>{ if(armed===a){ disarm("window"); } });
+  setStatus(`Heard "${prepText}" → understood as ${cmd.name.split(",")[0].toUpperCase()}… call ${cmd.exec} (voice burst${armed.src==="switch"?", mic switched":""})`, "ok", BURST.windowMs);
+  return true;
+}
+function disarm(why){
+  if(window.__armLog) window.__armLog.push({disarm:why, had:!!armed, t:Math.round(now())});
+  const a=armed; armed=null; if(!a) return;
+  if(a.src==="switch"){
+    if(why==="window" && !a.heard){ if(++switchMisses>=2){ execMode="words"; setStatus("Voice burst off: this phone gives the meter no sound while switching. Using words only.","warn",4000); } }
+    endSwitch();
+  }
+}
+function endSwitch(){ if(!burstHold) return; burstHold=false; if(!(coexist==="yes")) stopMic(); if(recOn) restartRec(); }
+/** Called for every meter frame (~25 ms). */
+function burstCheck(f){
+  const a=armed; if(!a || f.t<a.t-400) return;
+  const loud = f.rel>VOICE_REL;
+  if(a.src==="switch" && f.rel>3) a.heard++;
+  if(!loud){
+    if(a.on){ a.on=null; }                                    // a blip, not a word
+    if(a.quietSince===null) a.quietSince=f.t;
+    return;
+  }
+  if(a.quietSince===null || f.t-a.quietSince<BURST.gapMs){ a.quietSince=null; return; }   // still talking: no gap yet
+  if(!a.on) a.on={t0:f.t, peak:f.rel};
+  a.on.peak=Math.max(a.on.peak, f.rel);
+  if(f.t-a.on.t0>=BURST.confirmMs && a.on.peak>=BURST.riseDb) fireBurst(a, a.on.t0);
+}
+function fireBurst(a, t0){
+  if(window.__armLog) window.__armLog.push({fire:a.cmd.id, t:Math.round(now())});
+  armed=null; switchMisses=0;
+  const tag={cancelled:false, ran:false};
+  const p={cmd:a.cmd, prep:a.prepText, onsetT:t0, via:"voice burst", tag, score:1};
+  lastBurst={id:a.cmd.id, t:now(), onsetT:t0, tag, prepText:a.prepText, src:a.src};
+  lastCmdT=now(); pendingPrep = pendingPrep || {text:a.prepText, t:now()};   // so "march" alone can confirm
+  if(window.__burstLog) window.__burstLog.push({id:a.cmd.id, onsetT:t0, firedT:now()});
+  // judge on the opening of the execution word (inflection needs a little of it), anchored to the onset
+  later(Math.max(0, t0+160-now()), ()=>{ if(!tag.cancelled) judge(p, a.prepText+" … (voice burst)", now(), false); });
+  setStatus(`Heard "${a.prepText}" + voice burst → ${a.cmd.name.toUpperCase()}`, "ok", 4000);
+  if(a.src==="switch") watchSwitchEnd();
+}
+function watchSwitchEnd(){ const t0=now(); const chk=()=>{ if(now()-lastLoudT>200 || now()-t0>1200) endSwitch(); else later(50,chk); }; later(120,chk); }
+/** Cancel a burst-triggered command if its action step hasn't happened yet. */
+function cancelBurst(reason){
+  const b=lastBurst; if(!b || b.tag.cancelled) return false;
+  const pa=G.pendingAction;
+  if(b.tag.ran && pa && pa.actT) return false;              // too late: the action step already happened
+  b.tag.cancelled=true; G.sched=G.sched.filter(x=>x.tag!==b.tag);
+  if(b.tag.ran){
+    if(b.tag.pathLen!==undefined && F.path.segs.length>b.tag.pathLen){ F.path.segs.length=b.tag.pathLen; F._fi=null; }
+    G.busy=null; G.pendingAction=null;
+  }
+  picaaSet(["","","","",""]); lastBurst=null;
+  flash("AS YOU WERE","warn",reason); setStatus("Cancelled: "+reason, "warn", 3000);
+  return true;
+}
+/** Chrome's transcript after a burst: confirm, or cancel. Returns true if the result was handled. */
+function burstTranscript(hitCmd, fresh, isFinal){
+  const b=lastBurst; if(!b || now()-b.t>BURST.confirmWindowMs) return false;
+  const n=normalizeSpeech(fresh||"");
+  if(/\bas you were\b/.test(n)) return cancelBurst('Heard "as you were"'), true;
+  if(hitCmd){ if(hitCmd.id===b.id){ setStatus(`Confirmed by Chrome: "${fresh}" → ${hitCmd.name.toUpperCase()}`, "ok", 3000); lastBurst=null; pendingPrep=null; return true; } return false; }
+  if(!isFinal || !n) return false;
+  const prepEcho = parsePrepOnly(n) || fuzzyPrepOnly(n);
+  if(prepEcho && prepEcho.id===b.id) return true;            // Chrome caught up on the prep: nothing new
+  if(!hasExecWord(n)){ cancelBurst(`Chrome heard "${fresh}", not ${b.id==="halt"?"HALT":"an execution word"}`); return true; }
+  return false;
 }
 /* ---------- PICAA beat indicator: Prep · Interval · Command · Additional step · Action step ---------- */
 function picaaSet(st){ const el=$("picaa"); if(!el) return; [...el.querySelectorAll("b")].forEach((sp,i)=>sp.className=st[i]||""); el.classList.toggle("show", st.some(Boolean)); }
@@ -468,6 +581,7 @@ function step(t){
   clock.period=60000/bpm();
   if(t-clock.nextT>1000) clock.nextT=t;                     // resync after the tab was hidden
   while(t>=clock.nextT){ clock.lastT=clock.nextT; const k=clock.k++; clock.nextT+=clock.period; onBeat(k); }
+  runLater(t);
   const dtBeats=dt/clock.period;
   if(G.mode!=="practice") advance(dtBeats);
   layoutSoldiers(dtBeats,false);
@@ -499,6 +613,8 @@ async function begin(mode){
 /* ---------- Wire up the UI ---------- */
 document.querySelectorAll("[data-mode]").forEach(b=>b.addEventListener("click",()=>begin(b.dataset.mode)));
 $("btnRef").onclick=()=>show("ref"); $("refBack").onclick=()=>show("start");
+$("execMode").value=execMode;
+$("execMode").addEventListener("change",()=>{ execMode=$("execMode").value; localStorage.setItem("formation.execMode",execMode); switchMisses=0; });
 $("clarity").value=settings.clarity;
 $("clarity").addEventListener("change",()=>{ settings.clarity=$("clarity").value; localStorage.setItem("formation.clarity",settings.clarity); });
 
@@ -586,6 +702,11 @@ window.FG = {
              soldiers:allSoldiers().map(s=>[+s.x.toFixed(2),+s.y.toFixed(2),Math.round(((s.face/D2R)%360+360)%360)])}),
   setRecOn(v){ recOn=v; },
   now(){ return now(); },
+  addRecruit(){ addRecruitToFormation(); },
+  frame(db,hz){ pushFrame(now(), db, hz||0); },                  // feed the voice meter (tests)
+  meter(on){ micOK=on; if(on) noiseFloor=-60; },
+  burst:()=>({armed: armed && {id:armed.cmd.id, src:armed.src}, last: lastBurst && {id:lastBurst.id, onsetT:lastBurst.onsetT}, execMode}),
+  setExecMode(m){ execMode=m; },
   get G(){return G;}, get F(){return F;}, clock, settings, frames, handleResult, get rec(){return rec;}, get sessionText(){return sessionText;},
   analyse:(id,t)=>{ micOK=true; return analyseInflection(CMD[id], t); }, pushFrame, setFloor:v=>{noiseFloor=v;},
   showAnalysis:a=>{ lastAnalysis=a; },

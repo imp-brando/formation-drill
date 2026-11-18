@@ -117,6 +117,8 @@ const CMDS = [
   {id:"dress", name:"Dress right, DRESS", exec:"DRESS", re:RIGHT, foot:null, when:"halt", desc:"Heads and eyes right, left arms extended. Soldiers align on the right file."},
   {id:"eyes", name:"Eyes, RIGHT", exec:"RIGHT", re:"(?:^|\\s)(?:eyes|eye|ice|i's|ayes|i)$", foot:"R", when:"any", desc:"Heads and eyes 45° right. While marching, the right file keeps looking to the front. Called as the right foot strikes."},
   {id:"front", name:"Ready, FRONT", exec:"FRONT", re:"ready|reddy|readi", foot:"L", when:"any", desc:"Ends Dress right or Eyes right. Called as the left foot strikes when marching."},
+  {id:"cover", name:"COVER", exec:"COVER", re:"", single:true, foot:null, when:"halt", desc:"At the halt, in column. Right arms up: the front rank (except the far-left man) holds it out to the right side, everyone behind holds it straight forward toward the man ahead. Each Soldier aligns directly behind the man in front at the correct distance and holds until RECOVER."},
+  {id:"recover", name:"RECOVER", exec:"RECOVER", re:"", single:true, foot:null, when:"halt", desc:"Ends COVER: arms snap down to the sides, back to attention, aligned. Only valid after COVER."},
   {id:"fallin", name:"Fall, IN", exec:"IN", re:"fall", foot:null, when:"any", desc:"Forms the platoon in column at attention. Resets position, and restarts after Formation Broke."},
 ];
 const CMD = Object.fromEntries(CMDS.map(c=>[c.id,c]));
@@ -302,6 +304,10 @@ function parseExact(text){
   if(!tok.length) return null;
   // "Fall in" heard as a rhyme ("call in", "ball in", "paul in"...): only when that is ALL that was said
   if(/^(?:(?:platoon|squad|unit) )?(?:call|ball|paul|hall|fa|fah|fol|fawl|fallen|full|foll?) (?:in|inn|en|and)$/.test(t+"") || /^(?:(?:platoon|squad|unit) )?(?:call|ball|paul|hall|fa|fah|fol|fawl|full) (?:in|inn|en|and)$/.test(String(text).toLowerCase().replace(/[^a-z ]/g,"").replace(/\s+/g," ").trim())) return {cmd:CMD.fallin, prep:"fall"};
+  // COVER / RECOVER: one-part calls, accepted only when that is ALL that was said (so "take cover" is chatter)
+  const raw=String(text).toLowerCase().replace(/[^a-z ]/g,"").replace(/\s+/g," ").trim().replace(/^(?:platoon|squad|unit|flight|and) /,"");
+  if(/^(?:re|ree|ri|we|wee|reed|three) ?(?:cover|cuvver|covah|cova|cuva|kover|covers|covered|cuver)$|^(?:recovered|recovah|recuvver|recova|recovery|recuva|recover)$/.test(raw)) return {cmd:CMD.recover, prep:""};
+  if(/^(?:cover|cuvver|covah|cova|cuva|kover|covers|cuver|lover|brother|cover up|covah up|cupboard)$/.test(raw)) return {cmd:CMD.cover, prep:""};
   const last=tok[tok.length-1], tail=tok.slice(-4);
   // one-part and special forms
   if(last==="atease" && !tail.includes("standatease")) return {cmd:CMD.atease, prep:""};

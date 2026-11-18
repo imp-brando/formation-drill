@@ -77,11 +77,15 @@ function canExecute(c){
   if(G.over && c.id!=="fallin") return "Formation broke. Tap FALL IN";
   if(G.busy && c.id!=="fallin") return "Wait: "+G.busy+" in progress";
   const halted = G.move==="halt";
+  if(G.cover && c.id!=="recover") return "Arms are out at COVER. Call RECOVER first";
+  if(c.id==="recover" && !G.cover) return "Nothing to recover. Call COVER first";
+  if(c.id==="fallin" && !G.over && !halted) return "Halt the formation before FALL IN";
+  if(c.id==="forward" && G.move==="forward") return "Already marching forward";
   if(c.when==="halt" && !halted) return "Must be at the halt";
   if(c.when==="march" && halted) return c.id.includes("flank")? "At the halt, use Right/Left, FACE" : c.id==="rear"? "At the halt, use About, FACE" : "Must be marching";
   if(["rstep","lstep","back"].includes(G.move) && !["halt","fallin"].includes(c.id)) return "Halt the formation first";
   const S=SENS[settings.sens];
-  const needsAttn = ["forward","colR","colL","colHR","colHL","counter","mark","double","rstep","lstep","back","rface","lface","aface","dress","openranks","closeranks","extend","close","eyes"];
+  const needsAttn = ["forward","colR","colL","colHR","colHL","counter","mark","double","rstep","lstep","back","rface","lface","aface","dress","openranks","closeranks","extend","close","eyes","cover"];
   if(halted && G.posture!=="attention" && needsAttn.includes(c.id)){
     if(S.needAttn) return "Call "+settings.unit+", ATTENTION first";
     G.posture="attention";
@@ -105,6 +109,8 @@ function execute(c, kE){
   if(typeof picaaExec==="function") picaaExec(c, k, addl);
   const act=(kk,fn)=>{ if(kk<clock.k) fn(); else at(kk,fn); };   // run on beat kk (now if it has passed)
   const actionDone=()=>{ const pa=G.pendingAction; if(pa && !pa.actT){ pa.actT=now(); pa.actBeat=clock.k-1+clamp((now()-clock.lastT)/clock.period,0,1); } };
+  if(c.id==="cover"){ act(k,()=>{ startCover(); actionDone(); }); return; }
+  if(c.id==="recover"){ act(k,()=>{ doRecover(); actionDone(); }); return; }
   switch(c.id){
     case "forward":
       if(halted){ realignForStepOff(); G.move="forward"; actionDone(); }
@@ -287,7 +293,7 @@ function finishCounterColumn(){
   F.mode="column"; F.cc=null; G.busy=null; setStateTag();
 }
 
-function fallIn(){ newGame(G.mode); flash("FALL IN","ok","Formed in column at attention"); }
+function fallIn(){ newGame(G.mode); dishevel(); flash("FALL IN","ok","Formed, but ragged. Call COVER, then RECOVER"); }
 function spawnRecruits(){ spawnRecruit(); spawnRecruit(); spawnRecruit(); }   // three recruits out at once on the big field
 
 /* ======================================================================
@@ -448,6 +454,7 @@ function placeRecruit(s, q, rk){
   if(!rk.fs || !rk.fs[q]) return;
   const p=filePos(q, rk.fs[q]); if(!p) return;
   s.x=p.x; s.y=p.y; s.face=p.h; s.px=null; s.py=null;
+  if(G.sloppy) makeSloppy(s);                    // joins a ragged formation ragged; a covered one cleanly
 }
 function snakeRules(){
   if(G.mode!=="snake"||G.over||G.phase!=="formed") return;   // no formation yet: walls and bumps never break it
@@ -619,10 +626,11 @@ function startFallIn(){
   for(const z of slots){
     let bi=0, bd=1e9; free.forEach((s,i)=>{ const d=Math.hypot(s.x-z.x,s.y-z.y); if(d<bd){bd=d;bi=i;} });
     const s=free.splice(bi,1)[0]; F.ranks[z.r].sol[z.q]=s;
-    s.slot=z; s.arrived=false; s.isBase=(z===base); s.wander=null;
+    s.slot=z; s.arrived=false; s.isBase=(z===base); s.wander=null; makeSloppy(s);
     s.goAt = now() + (s.isBase? 0 : 250 + Math.random()*350);                // the base moves out first (double time)
   }
   if(G.sgt) G.sgt.goAt=now()+150;
+  G.sloppy=true;
   flash("FALL IN","ok","Double time! The base soldier sets; the rest fall in on him");
   return true;
 }
@@ -648,10 +656,11 @@ function scatterUpdate(dt){
         if(e<1.3 && e>1e-6){ const k=(1.3-e)*0.9; vx+=ex/e*k; vy+=ey/e*k; } }   // drift apart loosely
       if(G.sgt){ const ex=s.x-G.sgt.x, ey=s.y-G.sgt.y, e=Math.hypot(ex,ey); if(e<1.4 && e>1e-6){ vx+=ex/e*(1.4-e); vy+=ey/e*(1.4-e); } }
     } else {                                                          // forming
-      if(s.arrived){ s.x=s.slot.x; s.y=s.slot.y; }
+      const tg=slotTarget(s);
+      if(s.arrived){ s.x=tg.x; s.y=tg.y; }
       else if(t>=s.goAt){
-        const dx=s.slot.x-s.x, dy=s.slot.y-s.y, d=Math.hypot(dx,dy);
-        if(d<0.06){ s.arrived=true; s.x=s.slot.x; s.y=s.slot.y; }
+        const dx=tg.x-s.x, dy=tg.y-s.y, d=Math.hypot(dx,dy);
+        if(d<0.06){ s.arrived=true; s.x=tg.x; s.y=tg.y; }
         else {
           const v=Math.min(FORM_SPS, d/sec*0.9); vx=dx/d*v; vy=dy/d*v;
           for(const o of sol){ if(o===s) continue; const ex=s.x-o.x, ey=s.y-o.y, e=Math.hypot(ex,ey);   // sidestep others
@@ -666,15 +675,15 @@ function scatterUpdate(dt){
     s.spd=lerp(s.spd||0, running? 1.15 : Math.min(sp/1.6,1), .25);   // leg swing: strolling short, double time full
     s.walkPh=((s.walkPh||0)+(running? 3*sec : sp*sec/0.5))%2;       // own stride: strolling ~1.5/s, double time exactly 3/s (180/min)
     // face where he walks; once in his place, face the formation's front
-    const want = (G.phase==="forming" && (s.arrived || Math.hypot(s.slot.x-s.x,s.slot.y-s.y)<0.4)) ? s.slot.h : (sp>0.05 ? Math.atan2(vx,-vy) : s.face);
+    const want = (G.phase==="forming" && (s.arrived || Math.hypot(s.slot.x-s.x,s.slot.y-s.y)<0.4)) ? s.slot.h+(s.slop? s.slop.dh:0) : (sp>0.05 ? Math.atan2(vx,-vy) : s.face);
     let da=((want-s.face)%(2*Math.PI)+3*Math.PI)%(2*Math.PI)-Math.PI; s.face+=da*Math.min(1,dt/180);
     s.px=s.x; s.py=s.y;
   }
   sgtPreFormUpdate(dt);
   if(G.phase==="forming" && sol.every(s=>s.arrived) && (!G.sgt || G.sgt.arrived) && !G.dressT){
-    G.dressT=t; G.dress=true; G.eyes=true; setStateTag(); flash("DRESS RIGHT","ok","Dressing on the right file…");
+    G.dressT=t;                                                      // no automatic dress: they just settle, ragged
   }
-  if(G.dressT && t-G.dressT>1400){ finishFallIn(); }
+  if(G.dressT && t-G.dressT>400){ finishFallIn(); }
 }
 function finishFallIn(){
   G.dress=false; G.eyes=false; G.dressT=null; G.phase="formed";
@@ -683,7 +692,7 @@ function finishFallIn(){
   if(G.sgt){ const S=G.sgt; S.vf=[0,0]; S.lc=null; S.run=false; S.spd=0; S.goAt=null; if(S.post){ S.x=S.post.x; S.y=S.post.y; S.face=S.post.h; S.px=S.x; S.py=S.y; } S.post=null; }
   if(G.mode==="snake") spawnRecruits();
   updateHUD(); setStateTag();
-  flash("FORMED UP","ok",'Standing at attention. Say "Forward… MARCH!" to step off.');
+  flash("FORMED UP (RAGGED)","ok",'Call "COVER", then "RECOVER" to straighten them. Then "Forward… MARCH!"');
 }
 
 /** Drill sergeant before the formation exists: still in his corner watching the group; on FALL IN he
@@ -708,4 +717,68 @@ function sgtPreFormUpdate(dt){
   S.spd=lerp(S.spd||0, S.run?1.15:0, .25); S.walkPh=((S.walkPh||0)+(S.run? 3*sec : 0))%2;
   let da=((want-S.face)%(2*Math.PI)+3*Math.PI)%(2*Math.PI)-Math.PI; S.face+=da*Math.min(1,dt/200);
   S.px=S.x; S.py=S.y;
+}
+
+/* ======================================================================
+   DISHEVELED FALL-IN, COVER and RECOVER (TC 3-21.5: in column at the halt, COVER aligns each Soldier
+   directly behind the man in front at the correct distance, arms raised; RECOVER returns to attention).
+   The raggedness is a DRAW-ONLY offset (s.slop): s.x/s.y stay on the true grid, so walls, own-formation
+   checks and recruit pickup never see it and it can never cause a false "formation broke".
+====================================================================== */
+const COVER_MS=1500;
+function rnd(a){ return (Math.random()*2-1)*a; }
+function makeSloppy(s){
+  const mag=(a,m)=>{ let v=rnd(a); if(Math.abs(v)<m) v=(v<0?-1:1)*m; return v; };   // visibly off, still readable
+  s.slop={dx:mag(0.24,0.07), du:mag(0.2,0.05), dh:rnd(12)*D2R, ph:Math.random()*Math.PI*2};
+  s.slopK=1;
+}
+function dishevel(){ for(const s of allSoldiers()) makeSloppy(s); G.sloppy=true; G.cover=null; }
+/** Where a sloppy soldier actually stands during the form-up (true slot + his offset). */
+function slotTarget(s){
+  const z=s.slot, o=s.slop; if(!o) return {x:z.x,y:z.y};
+  const d=dirV(z.h), n=nrmV(z.h);
+  return {x:z.x+n[0]*o.dx+d[0]*o.du, y:z.y+n[1]*o.dx+d[1]*o.du};
+}
+/** Visual offset for drawing: [dx, dy, dFace]. Marching ragged = the offsets breathe a little. */
+function visOff(s){
+  const o=s.slop; if(!o || !(G.phase==="formed" || s.arrived)) return [0,0,0];
+  const k=s.slopK===undefined?1:s.slopK, t=now(), per=(clock&&clock.period)||500;
+  const m = G.phase==="formed" && marching();
+  const w = m ? 1+0.35*Math.sin(t/(per*2.3)+o.ph) : 1;
+  const bob = m ? 0.06*Math.sin(t/(per*1.3)+o.ph*1.7) : 0;
+  const d=dirV(s.face), n=nrmV(s.face), lat=(o.dx*w+bob)*k, fwd=o.du*w*k;
+  return [n[0]*lat+d[0]*fwd, n[1]*lat+d[1]*fwd, o.dh*k];
+}
+/** Which arm each soldier raises at COVER, relative to the formation's facing: front rank right arm
+    out to the side (except the far-left man), everyone behind right arm forward to the man ahead. */
+function assignArms(){
+  const sol=allSoldiers(); if(!sol.length) return;
+  let fx=0, fy=0; for(const s of sol){ fx+=Math.sin(s.face); fy+=-Math.cos(s.face); }
+  const h=Math.atan2(fx,-fy), d=dirV(h), n=nrmV(h);
+  const fw=s=>s.x*d[0]+s.y*d[1], rt=s=>s.x*n[0]+s.y*n[1];
+  const maxF=Math.max(...sol.map(fw));
+  const front=sol.filter(s=>fw(s)>maxF-0.5);
+  const minR=Math.min(...front.map(rt));
+  for(const s of sol) s.arm = front.includes(s) ? (rt(s)<minR+0.3 ? null : "lat") : "fwd";
+}
+function startCover(){
+  assignArms();
+  G.cover={t0:now(), hold:false};
+  for(const s of allSoldiers()){ if(!s.slop) s.slop=null; s.coverDelay=Math.random()*0.25; s.slopK0=s.slop?(s.slopK===undefined?1:s.slopK):0; }
+  setStateTag && setStateTag();
+}
+function coverUpdate(){
+  const C=G.cover; if(!C || C.hold) return;
+  const u=(now()-C.t0)/COVER_MS;
+  for(const s of allSoldiers()){
+    if(!s.slop) continue;
+    const v=clamp((u-s.coverDelay)/0.7,0,1);
+    s.slopK=s.slopK0*(1-ease(v)); s.shuffle = v>0 && v<1;           // small shuffling steps while adjusting
+  }
+  if(u>=1){ for(const s of allSoldiers()){ s.slop=null; s.slopK=1; s.shuffle=false; } G.sloppy=false; C.hold=true; }
+}
+function doRecover(){
+  for(const s of allSoldiers()){ s.slop=null; s.slopK=1; s.shuffle=false; s.arm=null; }
+  G.cover=null; G.sloppy=false; G.posture="attention";
+  setStateTag && setStateTag();
 }

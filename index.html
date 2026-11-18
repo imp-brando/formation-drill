@@ -95,7 +95,7 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
   <div id="noSR" class="notice"><b>Speech recognition isn't available in this browser.</b> Use Chrome on Android, or Safari on iOS 14.5 or later, over HTTPS. Inflection Practice still works.</div>
   <div id="noMic" class="notice"></div>
   <div class="card">
-    <b>To start, say "Fall in."</b> Your soldiers begin scattered across the field; calling <b>FALL IN</b> forms them up at attention. Then say <b>"Forward… MARCH!"</b> to step off.<br><b>Command your formation by voice.</b> Give the <b>preparatory command</b> ("Column right…"), then <b>emphasize the command of execution</b> ("MARCH!"). Make it louder, change your pitch on it, or pause briefly before it.<br>
+    <b>To start, say "Fall in."</b> Your soldiers begin scattered across the field; calling <b>FALL IN</b> forms them up at attention, but ragged. Next say <b>"Cover"</b> (right arms up, everyone lines up behind the man in front), then <b>"Recover"</b> (arms down, aligned). Then say <b>"Forward… MARCH!"</b> to step off. A wrong call for the moment flashes a <b>!</b> over the drill sergeant for a second; nothing else happens.<br><b>Command your formation by voice.</b> Give the <b>preparatory command</b> ("Column right…"), then <b>emphasize the command of execution</b> ("MARCH!"). Make it louder, change your pitch on it, or pause briefly before it.<br>
     <b>Recruit:</b> any one of those counts. <b>Soldier:</b> any two. <b>Drill Sergeant:</b> all of them, plus a short, sharp execution called on the correct foot. <b>Commands only:</b> no voice check, for warm-up.
   </div>
   <div class="card row" style="justify-content:space-between">
@@ -141,8 +141,8 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
     <button id="btnRef">Command Reference</button>
   </div>
   <div class="card" style="font-size:12px">
-    <b>Quick list:</b> <b>Fall, IN (start here)</b> · Forward, MARCH · Platoon, HALT · Column right/left, MARCH · Column half right/left, MARCH · Right/Left flank, MARCH · Rear, MARCH · Counter column, MARCH · Mark time, MARCH · Half step, MARCH · Quick/Double time, MARCH · Change step, MARCH · Right/Left step, MARCH · Backward, MARCH · Right/Left/About, FACE · Parade, REST · Stand at, EASE · AT EASE · Platoon, ATTENTION · Dress right, DRESS · Eyes, RIGHT · Ready, FRONT · Open/Close ranks, MARCH · Extend/Close, MARCH.
-    <br><br><b>Snake:</b> soldiers start scattered; say <b>"Fall in"</b> to form up (bumping walls before that doesn't count). Then pick up recruits (gold) to grow the formation. Marching into a wall or into your own formation = <b>FORMATION BROKE</b>.
+    <b>Quick list:</b> <b>Fall, IN (start here)</b> · <b>COVER</b> · <b>RECOVER</b> · Forward, MARCH · Platoon, HALT · Column right/left, MARCH · Column half right/left, MARCH · Right/Left flank, MARCH · Rear, MARCH · Counter column, MARCH · Mark time, MARCH · Half step, MARCH · Quick/Double time, MARCH · Change step, MARCH · Right/Left step, MARCH · Backward, MARCH · Right/Left/About, FACE · Parade, REST · Stand at, EASE · AT EASE · Platoon, ATTENTION · Dress right, DRESS · Eyes, RIGHT · Ready, FRONT · Open/Close ranks, MARCH · Extend/Close, MARCH.
+    <br><br><b>Snake:</b> soldiers start scattered; say <b>"Fall in"</b> to form up (bumping walls before that doesn't count), then <b>"Cover"</b> and <b>"Recover"</b> to straighten the ragged ranks. Then pick up recruits (gold) to grow the formation. Marching into a wall or into your own formation = <b>FORMATION BROKE</b>.
     <br>High score: <b id="hiStart">0</b>
   </div>
 </section>
@@ -192,7 +192,7 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
   </div>
   <div id="panel">
     <canvas id="meter" width="500" height="84"></canvas>
-    <div id="verdict">Say "Fall in" to form up</div>
+    <div id="verdict">Say "Fall in", then "Cover", "Recover"</div>
     <div id="detail"></div>
     <div class="row" style="flex-wrap:nowrap;gap:6px">
       <div style="flex:1;min-width:0">
@@ -413,6 +413,8 @@ const CMDS = [
   {id:"dress", name:"Dress right, DRESS", exec:"DRESS", re:RIGHT, foot:null, when:"halt", desc:"Heads and eyes right, left arms extended. Soldiers align on the right file."},
   {id:"eyes", name:"Eyes, RIGHT", exec:"RIGHT", re:"(?:^|\\s)(?:eyes|eye|ice|i's|ayes|i)$", foot:"R", when:"any", desc:"Heads and eyes 45° right. While marching, the right file keeps looking to the front. Called as the right foot strikes."},
   {id:"front", name:"Ready, FRONT", exec:"FRONT", re:"ready|reddy|readi", foot:"L", when:"any", desc:"Ends Dress right or Eyes right. Called as the left foot strikes when marching."},
+  {id:"cover", name:"COVER", exec:"COVER", re:"", single:true, foot:null, when:"halt", desc:"At the halt, in column. Right arms up: the front rank (except the far-left man) holds it out to the right side, everyone behind holds it straight forward toward the man ahead. Each Soldier aligns directly behind the man in front at the correct distance and holds until RECOVER."},
+  {id:"recover", name:"RECOVER", exec:"RECOVER", re:"", single:true, foot:null, when:"halt", desc:"Ends COVER: arms snap down to the sides, back to attention, aligned. Only valid after COVER."},
   {id:"fallin", name:"Fall, IN", exec:"IN", re:"fall", foot:null, when:"any", desc:"Forms the platoon in column at attention. Resets position, and restarts after Formation Broke."},
 ];
 const CMD = Object.fromEntries(CMDS.map(c=>[c.id,c]));
@@ -598,6 +600,10 @@ function parseExact(text){
   if(!tok.length) return null;
   // "Fall in" heard as a rhyme ("call in", "ball in", "paul in"...): only when that is ALL that was said
   if(/^(?:(?:platoon|squad|unit) )?(?:call|ball|paul|hall|fa|fah|fol|fawl|fallen|full|foll?) (?:in|inn|en|and)$/.test(t+"") || /^(?:(?:platoon|squad|unit) )?(?:call|ball|paul|hall|fa|fah|fol|fawl|full) (?:in|inn|en|and)$/.test(String(text).toLowerCase().replace(/[^a-z ]/g,"").replace(/\s+/g," ").trim())) return {cmd:CMD.fallin, prep:"fall"};
+  // COVER / RECOVER: one-part calls, accepted only when that is ALL that was said (so "take cover" is chatter)
+  const raw=String(text).toLowerCase().replace(/[^a-z ]/g,"").replace(/\s+/g," ").trim().replace(/^(?:platoon|squad|unit|flight|and) /,"");
+  if(/^(?:re|ree|ri|we|wee|reed|three) ?(?:cover|cuvver|covah|cova|cuva|kover|covers|covered|cuver)$|^(?:recovered|recovah|recuvver|recova|recovery|recuva|recover)$/.test(raw)) return {cmd:CMD.recover, prep:""};
+  if(/^(?:cover|cuvver|covah|cova|cuva|kover|covers|cuver|lover|brother|cover up|covah up|cupboard)$/.test(raw)) return {cmd:CMD.cover, prep:""};
   const last=tok[tok.length-1], tail=tok.slice(-4);
   // one-part and special forms
   if(last==="atease" && !tail.includes("standatease")) return {cmd:CMD.atease, prep:""};
@@ -1186,11 +1192,15 @@ function canExecute(c){
   if(G.over && c.id!=="fallin") return "Formation broke. Tap FALL IN";
   if(G.busy && c.id!=="fallin") return "Wait: "+G.busy+" in progress";
   const halted = G.move==="halt";
+  if(G.cover && c.id!=="recover") return "Arms are out at COVER. Call RECOVER first";
+  if(c.id==="recover" && !G.cover) return "Nothing to recover. Call COVER first";
+  if(c.id==="fallin" && !G.over && !halted) return "Halt the formation before FALL IN";
+  if(c.id==="forward" && G.move==="forward") return "Already marching forward";
   if(c.when==="halt" && !halted) return "Must be at the halt";
   if(c.when==="march" && halted) return c.id.includes("flank")? "At the halt, use Right/Left, FACE" : c.id==="rear"? "At the halt, use About, FACE" : "Must be marching";
   if(["rstep","lstep","back"].includes(G.move) && !["halt","fallin"].includes(c.id)) return "Halt the formation first";
   const S=SENS[settings.sens];
-  const needsAttn = ["forward","colR","colL","colHR","colHL","counter","mark","double","rstep","lstep","back","rface","lface","aface","dress","openranks","closeranks","extend","close","eyes"];
+  const needsAttn = ["forward","colR","colL","colHR","colHL","counter","mark","double","rstep","lstep","back","rface","lface","aface","dress","openranks","closeranks","extend","close","eyes","cover"];
   if(halted && G.posture!=="attention" && needsAttn.includes(c.id)){
     if(S.needAttn) return "Call "+settings.unit+", ATTENTION first";
     G.posture="attention";
@@ -1214,6 +1224,8 @@ function execute(c, kE){
   if(typeof picaaExec==="function") picaaExec(c, k, addl);
   const act=(kk,fn)=>{ if(kk<clock.k) fn(); else at(kk,fn); };   // run on beat kk (now if it has passed)
   const actionDone=()=>{ const pa=G.pendingAction; if(pa && !pa.actT){ pa.actT=now(); pa.actBeat=clock.k-1+clamp((now()-clock.lastT)/clock.period,0,1); } };
+  if(c.id==="cover"){ act(k,()=>{ startCover(); actionDone(); }); return; }
+  if(c.id==="recover"){ act(k,()=>{ doRecover(); actionDone(); }); return; }
   switch(c.id){
     case "forward":
       if(halted){ realignForStepOff(); G.move="forward"; actionDone(); }
@@ -1396,7 +1408,7 @@ function finishCounterColumn(){
   F.mode="column"; F.cc=null; G.busy=null; setStateTag();
 }
 
-function fallIn(){ newGame(G.mode); flash("FALL IN","ok","Formed in column at attention"); }
+function fallIn(){ newGame(G.mode); dishevel(); flash("FALL IN","ok","Formed, but ragged. Call COVER, then RECOVER"); }
 function spawnRecruits(){ spawnRecruit(); spawnRecruit(); spawnRecruit(); }   // three recruits out at once on the big field
 
 /* ======================================================================
@@ -1557,6 +1569,7 @@ function placeRecruit(s, q, rk){
   if(!rk.fs || !rk.fs[q]) return;
   const p=filePos(q, rk.fs[q]); if(!p) return;
   s.x=p.x; s.y=p.y; s.face=p.h; s.px=null; s.py=null;
+  if(G.sloppy) makeSloppy(s);                    // joins a ragged formation ragged; a covered one cleanly
 }
 function snakeRules(){
   if(G.mode!=="snake"||G.over||G.phase!=="formed") return;   // no formation yet: walls and bumps never break it
@@ -1728,10 +1741,11 @@ function startFallIn(){
   for(const z of slots){
     let bi=0, bd=1e9; free.forEach((s,i)=>{ const d=Math.hypot(s.x-z.x,s.y-z.y); if(d<bd){bd=d;bi=i;} });
     const s=free.splice(bi,1)[0]; F.ranks[z.r].sol[z.q]=s;
-    s.slot=z; s.arrived=false; s.isBase=(z===base); s.wander=null;
+    s.slot=z; s.arrived=false; s.isBase=(z===base); s.wander=null; makeSloppy(s);
     s.goAt = now() + (s.isBase? 0 : 250 + Math.random()*350);                // the base moves out first (double time)
   }
   if(G.sgt) G.sgt.goAt=now()+150;
+  G.sloppy=true;
   flash("FALL IN","ok","Double time! The base soldier sets; the rest fall in on him");
   return true;
 }
@@ -1757,10 +1771,11 @@ function scatterUpdate(dt){
         if(e<1.3 && e>1e-6){ const k=(1.3-e)*0.9; vx+=ex/e*k; vy+=ey/e*k; } }   // drift apart loosely
       if(G.sgt){ const ex=s.x-G.sgt.x, ey=s.y-G.sgt.y, e=Math.hypot(ex,ey); if(e<1.4 && e>1e-6){ vx+=ex/e*(1.4-e); vy+=ey/e*(1.4-e); } }
     } else {                                                          // forming
-      if(s.arrived){ s.x=s.slot.x; s.y=s.slot.y; }
+      const tg=slotTarget(s);
+      if(s.arrived){ s.x=tg.x; s.y=tg.y; }
       else if(t>=s.goAt){
-        const dx=s.slot.x-s.x, dy=s.slot.y-s.y, d=Math.hypot(dx,dy);
-        if(d<0.06){ s.arrived=true; s.x=s.slot.x; s.y=s.slot.y; }
+        const dx=tg.x-s.x, dy=tg.y-s.y, d=Math.hypot(dx,dy);
+        if(d<0.06){ s.arrived=true; s.x=tg.x; s.y=tg.y; }
         else {
           const v=Math.min(FORM_SPS, d/sec*0.9); vx=dx/d*v; vy=dy/d*v;
           for(const o of sol){ if(o===s) continue; const ex=s.x-o.x, ey=s.y-o.y, e=Math.hypot(ex,ey);   // sidestep others
@@ -1775,15 +1790,15 @@ function scatterUpdate(dt){
     s.spd=lerp(s.spd||0, running? 1.15 : Math.min(sp/1.6,1), .25);   // leg swing: strolling short, double time full
     s.walkPh=((s.walkPh||0)+(running? 3*sec : sp*sec/0.5))%2;       // own stride: strolling ~1.5/s, double time exactly 3/s (180/min)
     // face where he walks; once in his place, face the formation's front
-    const want = (G.phase==="forming" && (s.arrived || Math.hypot(s.slot.x-s.x,s.slot.y-s.y)<0.4)) ? s.slot.h : (sp>0.05 ? Math.atan2(vx,-vy) : s.face);
+    const want = (G.phase==="forming" && (s.arrived || Math.hypot(s.slot.x-s.x,s.slot.y-s.y)<0.4)) ? s.slot.h+(s.slop? s.slop.dh:0) : (sp>0.05 ? Math.atan2(vx,-vy) : s.face);
     let da=((want-s.face)%(2*Math.PI)+3*Math.PI)%(2*Math.PI)-Math.PI; s.face+=da*Math.min(1,dt/180);
     s.px=s.x; s.py=s.y;
   }
   sgtPreFormUpdate(dt);
   if(G.phase==="forming" && sol.every(s=>s.arrived) && (!G.sgt || G.sgt.arrived) && !G.dressT){
-    G.dressT=t; G.dress=true; G.eyes=true; setStateTag(); flash("DRESS RIGHT","ok","Dressing on the right file…");
+    G.dressT=t;                                                      // no automatic dress: they just settle, ragged
   }
-  if(G.dressT && t-G.dressT>1400){ finishFallIn(); }
+  if(G.dressT && t-G.dressT>400){ finishFallIn(); }
 }
 function finishFallIn(){
   G.dress=false; G.eyes=false; G.dressT=null; G.phase="formed";
@@ -1792,7 +1807,7 @@ function finishFallIn(){
   if(G.sgt){ const S=G.sgt; S.vf=[0,0]; S.lc=null; S.run=false; S.spd=0; S.goAt=null; if(S.post){ S.x=S.post.x; S.y=S.post.y; S.face=S.post.h; S.px=S.x; S.py=S.y; } S.post=null; }
   if(G.mode==="snake") spawnRecruits();
   updateHUD(); setStateTag();
-  flash("FORMED UP","ok",'Standing at attention. Say "Forward… MARCH!" to step off.');
+  flash("FORMED UP (RAGGED)","ok",'Call "COVER", then "RECOVER" to straighten them. Then "Forward… MARCH!"');
 }
 
 /** Drill sergeant before the formation exists: still in his corner watching the group; on FALL IN he
@@ -1817,6 +1832,70 @@ function sgtPreFormUpdate(dt){
   S.spd=lerp(S.spd||0, S.run?1.15:0, .25); S.walkPh=((S.walkPh||0)+(S.run? 3*sec : 0))%2;
   let da=((want-S.face)%(2*Math.PI)+3*Math.PI)%(2*Math.PI)-Math.PI; S.face+=da*Math.min(1,dt/200);
   S.px=S.x; S.py=S.y;
+}
+
+/* ======================================================================
+   DISHEVELED FALL-IN, COVER and RECOVER (TC 3-21.5: in column at the halt, COVER aligns each Soldier
+   directly behind the man in front at the correct distance, arms raised; RECOVER returns to attention).
+   The raggedness is a DRAW-ONLY offset (s.slop): s.x/s.y stay on the true grid, so walls, own-formation
+   checks and recruit pickup never see it and it can never cause a false "formation broke".
+====================================================================== */
+const COVER_MS=1500;
+function rnd(a){ return (Math.random()*2-1)*a; }
+function makeSloppy(s){
+  const mag=(a,m)=>{ let v=rnd(a); if(Math.abs(v)<m) v=(v<0?-1:1)*m; return v; };   // visibly off, still readable
+  s.slop={dx:mag(0.24,0.07), du:mag(0.2,0.05), dh:rnd(12)*D2R, ph:Math.random()*Math.PI*2};
+  s.slopK=1;
+}
+function dishevel(){ for(const s of allSoldiers()) makeSloppy(s); G.sloppy=true; G.cover=null; }
+/** Where a sloppy soldier actually stands during the form-up (true slot + his offset). */
+function slotTarget(s){
+  const z=s.slot, o=s.slop; if(!o) return {x:z.x,y:z.y};
+  const d=dirV(z.h), n=nrmV(z.h);
+  return {x:z.x+n[0]*o.dx+d[0]*o.du, y:z.y+n[1]*o.dx+d[1]*o.du};
+}
+/** Visual offset for drawing: [dx, dy, dFace]. Marching ragged = the offsets breathe a little. */
+function visOff(s){
+  const o=s.slop; if(!o || !(G.phase==="formed" || s.arrived)) return [0,0,0];
+  const k=s.slopK===undefined?1:s.slopK, t=now(), per=(clock&&clock.period)||500;
+  const m = G.phase==="formed" && marching();
+  const w = m ? 1+0.35*Math.sin(t/(per*2.3)+o.ph) : 1;
+  const bob = m ? 0.06*Math.sin(t/(per*1.3)+o.ph*1.7) : 0;
+  const d=dirV(s.face), n=nrmV(s.face), lat=(o.dx*w+bob)*k, fwd=o.du*w*k;
+  return [n[0]*lat+d[0]*fwd, n[1]*lat+d[1]*fwd, o.dh*k];
+}
+/** Which arm each soldier raises at COVER, relative to the formation's facing: front rank right arm
+    out to the side (except the far-left man), everyone behind right arm forward to the man ahead. */
+function assignArms(){
+  const sol=allSoldiers(); if(!sol.length) return;
+  let fx=0, fy=0; for(const s of sol){ fx+=Math.sin(s.face); fy+=-Math.cos(s.face); }
+  const h=Math.atan2(fx,-fy), d=dirV(h), n=nrmV(h);
+  const fw=s=>s.x*d[0]+s.y*d[1], rt=s=>s.x*n[0]+s.y*n[1];
+  const maxF=Math.max(...sol.map(fw));
+  const front=sol.filter(s=>fw(s)>maxF-0.5);
+  const minR=Math.min(...front.map(rt));
+  for(const s of sol) s.arm = front.includes(s) ? (rt(s)<minR+0.3 ? null : "lat") : "fwd";
+}
+function startCover(){
+  assignArms();
+  G.cover={t0:now(), hold:false};
+  for(const s of allSoldiers()){ if(!s.slop) s.slop=null; s.coverDelay=Math.random()*0.25; s.slopK0=s.slop?(s.slopK===undefined?1:s.slopK):0; }
+  setStateTag && setStateTag();
+}
+function coverUpdate(){
+  const C=G.cover; if(!C || C.hold) return;
+  const u=(now()-C.t0)/COVER_MS;
+  for(const s of allSoldiers()){
+    if(!s.slop) continue;
+    const v=clamp((u-s.coverDelay)/0.7,0,1);
+    s.slopK=s.slopK0*(1-ease(v)); s.shuffle = v>0 && v<1;           // small shuffling steps while adjusting
+  }
+  if(u>=1){ for(const s of allSoldiers()){ s.slop=null; s.slopK=1; s.shuffle=false; } G.sloppy=false; C.hold=true; }
+}
+function doRecover(){
+  for(const s of allSoldiers()){ s.slop=null; s.slopK=1; s.shuffle=false; s.arm=null; }
+  G.cover=null; G.sloppy=false; G.posture="attention";
+  setStateTag && setStateTag();
 }
 
 /* ======================================================================
@@ -1860,9 +1939,20 @@ function draw(phase){
   }
   for(let r=F.ranks.length-1;r>=0;r--) F.ranks[r].sol.forEach((s,sq)=>{ if(s) drawSoldier(s, phase, sq); });
   if(G.sgt && G.mode!=="practice") drawSergeant(G.sgt);
+  if(G.sgt && G.mode!=="practice" && G.bangT && now()-G.bangT<BANG_MS){       // error "!" over the DS's head
+    const S=G.sgt, u=(now()-G.bangT)/BANG_MS;
+    ctx.setTransform(1,0,0,1,0,0);
+    const px=S.x*sc+view.ox, R=Math.max(14, sc*0.75), py=S.y*sc+view.oy - Math.max(sc*0.6,12) - R*(1+0.15*Math.sin(u*Math.PI*6)*(1-u));
+    ctx.globalAlpha = u>0.8 ? (1-u)/0.2 : 1;
+    ctx.fillStyle="#ffd21f"; ctx.strokeStyle="#b00000"; ctx.lineWidth=Math.max(2,R*0.16);
+    ctx.beginPath(); ctx.arc(px,py,R,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle="#c00000"; ctx.font=`900 ${Math.round(R*1.5)}px system-ui`; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText("!", px, py+R*0.06); ctx.textAlign="start"; ctx.textBaseline="alphabetic"; ctx.globalAlpha=1;
+    ctx.setTransform(sc,0,0,sc,view.ox,view.oy);
+  }
   if(G.phase && G.phase!=="formed"){                                   // on-field prompt before the formation exists
     ctx.setTransform(1,0,0,1,0,0);
-    const txt = G.phase==="scatter" ? "Call: FALL IN" : (G.dressT ? "Dress right… ready front" : "Falling in: DOUBLE TIME");
+    const txt = G.phase==="scatter" ? "Call: FALL IN" : (G.dressT ? "Settling in…" : "Falling in: DOUBLE TIME");
     const fs=Math.round(Math.min(W,H)*0.07); ctx.font=`bold ${fs}px system-ui`; ctx.textAlign="center"; ctx.textBaseline="middle";
     const tw=ctx.measureText(txt).width, y=H*0.42;
     ctx.fillStyle="rgba(20,24,8,.72)"; ctx.fillRect(W/2-tw/2-fs*0.6, y-fs*0.85, tw+fs*1.2, fs*1.7);
@@ -1908,10 +1998,12 @@ function drawSoldier(s, phase, sq){
   const inPlace = !halted && marching() && amp<0.2;            // mark time, pivot, closing, waiting rank
   const rightFile = sq===F.W-1;
   const k = G.mode==="snake" ? 1.4 : 1.25;                   // sprites scaled up within the step so legs stay readable on the bigger field
-  ctx.save(); ctx.translate(s.x,s.y); ctx.scale(k,k);
-  drawBody(0,0,s.face, halted?0:amp, phase, "#3e4a1c","#151905", {
+  const vo=visOff(s), shuf=halted && s.shuffle;
+  ctx.save(); ctx.translate(s.x+vo[0],s.y+vo[1]); ctx.scale(k,k);
+  drawBody(0,0,s.face+vo[2], halted?0:amp, shuf? (now()/250+s.id*0.37)%2 : phase, "#3e4a1c","#151905", {
+    arm: G.cover ? s.arm : null,
     posture:halted?G.posture:"attention", dress:G.dress && !rightFile, eyes:(G.eyes||G.dress) && !(marching() && rightFile && G.eyes) && !(G.dress && rightFile),
-    lift: inPlace? 1-amp/0.2 : 0 });
+    lift: shuf? 0.6 : inPlace? 1-amp/0.2 : 0 });
   ctx.restore();
 }
 function drawBody(x,y,h,amp,phase,fill,stroke,opt){
@@ -1930,6 +2022,13 @@ function drawBody(x,y,h,amp,phase,fill,stroke,opt){
     ctx.beginPath(); ctx.moveTo(hx,hy); ctx.lineTo(fx,fy); ctx.stroke();
     ctx.fillStyle= lf>0.3? "#8a6a3a" : "#120c05";       // a raised boot shows lighter (knee up)
     ctx.beginPath(); ctx.ellipse(fx+d[0]*.03,fy+d[1]*.03,0.085+lf*.03,0.125+lf*.03,h,0,Math.PI*2); ctx.fill();
+  }
+  if(opt.arm){                                             // COVER: right arm out to the side, or straight forward
+    const sx=x+n[0]*.15, sy=y+n[1]*.15, v= opt.arm==="lat" ? n : d, L= opt.arm==="lat" ? 0.62 : 0.66;
+    const ex=sx+v[0]*L, ey=sy+v[1]*L;
+    ctx.strokeStyle="#151905"; ctx.lineWidth=0.15; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
+    ctx.strokeStyle=fill; ctx.lineWidth=0.09; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
+    ctx.fillStyle="#d9b98c"; ctx.beginPath(); ctx.arc(ex,ey,0.06,0,Math.PI*2); ctx.fill();   // hand
   }
   if(opt.dress){ ctx.strokeStyle=fill; ctx.lineWidth=0.09; ctx.beginPath(); ctx.moveTo(x-n[0]*.15,y-n[1]*.15); ctx.lineTo(x-n[0]*.62,y-n[1]*.62); ctx.stroke(); }
   ctx.fillStyle=fill; ctx.strokeStyle=stroke; ctx.lineWidth=0.05;
@@ -2086,8 +2185,13 @@ function handleResult(e){
       triggerProbe=true;
       const prep=parsePrepOnly(firstFresh) || (settings.clarity!=="exact" && fuzzyPrepOnly(firstFresh));
       if(prep){
-        pendingPrep={text:firstFresh, t:now()}; picaaPrep(); armBurst(prep, top, true);
+        const pp={text:firstFresh, t:now()}; pendingPrep=pp; picaaPrep(); armBurst(prep, top, true);
+        later(PREP_WAIT_MS+250, ()=>{ if(pendingPrep===pp && lastCmdT<pp.t){ pendingPrep=null; dsError(`No command of execution after "${prep.name.split(",")[0]}"`); } });
         setStatus(`Heard "${top}" → understood as ${prep.name.split(",")[0].toUpperCase()}… waiting for ${prep.exec}`, "ok", 3500);
+      } else if(isBareExec(firstFresh)){
+        // an execution word with no preparatory command ("MARCH!", "HALT!"): a drill error, not chatter
+        $("heard").className="faint"; $("heardTxt").textContent=top;
+        dsError(`"${top}" with no preparatory command`);
       } else {
         // not a drill command: discard quietly (no flash, no penalty)
         $("heard").className="faint"; $("heardTxt").textContent=top+" (ignored)";
@@ -2099,6 +2203,11 @@ function handleResult(e){
   if(pendingProbe && triggerProbe) setTimeout(startProbeAfterSpeech, 300);
 }
 
+/** Only execution word(s), nothing else: "march", "harch", "halt", "face", "hut"... */
+function isBareExec(text){
+  const w=String(text).toLowerCase().replace(/[^a-z ]/g,"").trim().split(/\s+/).filter(Boolean);
+  return w.length>0 && w.length<=2 && w.every(x=>/^(?:march|marche|harch|hutch|hut|halt|hault|holt|face|faced|haas)$/.test(x));
+}
 /* ---------- Game over: stop listening completely (mic indicator off) until the user taps ---------- */
 function stopListening(why){
   armed=null; burstHold=false;
@@ -2183,21 +2292,29 @@ function onCommandHeard(p, raw){
   };
   poll();
 }
+/** A drill command that's wrong for the moment: a "!" over the drill sergeant for 1 s. Nothing else
+    changes (no score, no movement, no game over); the status line can say why. */
+const BANG_MS=1000;
+function dsError(why){
+  if(!G || G.mode==="practice") return;
+  G.bangT=now(); G.bangN=(G.bangN||0)+1;
+  if(why) $("detail").textContent=why;
+}
 function judge(p, raw, heardAt, typed){
   const c=p.cmd, S=SENS[settings.sens];
   // No formation yet: only FALL IN counts (a one-part call here, no inflection check); every other
   // command is ignored with a quiet hint.
   if(G.phase && G.phase!=="formed" && G.mode!=="practice"){
     if(c.id==="fallin" && G.phase==="scatter"){ lastAnalysis={ok:true,detail:"Fall in"}; startFallIn(); return; }
-    $("detail").textContent = G.phase==="scatter" ? "Call FALL IN to form up" : "Falling in… wait until they're formed";
+    dsError(G.phase==="scatter" ? "Call FALL IN to form up" : "Falling in… wait until they're formed");
     return;
   }
   const a = c.single? {ok:true, detail:"One-part command (no inflection needed)"} : typed? {ok:true, detail:"Typed (debug): inflection skipped"} : analyseInflection(c, heardAt);
   lastAnalysis=a;
   if(G.mode==="practice"){ reportVerdict(c,a,footCheck(c,a)); return; }
-  if(!a.ok) return reportVerdict(c,a);
+  if(!a.ok){ dsError(); return reportVerdict(c,a); }
   const why=canExecute(c);
-  if(why) return reportVerdict(c,{ok:false,reason:"Can't execute",detail:why});
+  if(why){ if(!G.over) dsError(); return reportVerdict(c,{ok:false,reason:"Can't execute",detail:why}); }
   const fc=footCheck(c,a);
   if(fc && fc.wrong && S.foot==="reject") return reportVerdict(c,{ok:false,reason:"Wrong foot",detail:`Call it as the ${fc.want==="L"?"left":"right"} foot strikes`,ex:a.ex,prepSegs:a.prepSegs}, fc);
   // Executed on the next beat; foot-specific commands wait for the correct foot while marching.
@@ -2447,7 +2564,7 @@ function step(t){
   if(G.mode!=="practice") advance(dtBeats);
   layoutSoldiers(dtBeats,false);
   if(G.mode!=="practice") sgtUpdate(dt);
-  scatterUpdate(dt);
+  scatterUpdate(dt); coverUpdate();
   snakeRules();
   const frac=clamp((t-clock.lastT)/clock.period,0,1);
   const phase=(footOf(clock.k-1)==="L"?0:1)+frac;           // beats since the last LEFT strike
@@ -2570,8 +2687,13 @@ window.FG = {
   now(){ return now(); },
   addRecruit(){ addRecruitToFormation(); },
   phase:()=>G.phase,
+  bang:()=>({on: !!(G.bangT && now()-G.bangT<BANG_MS), n:G.bangN||0, t:G.bangT||null}),
+  cover:()=>({cover:!!G.cover, hold:!!(G.cover&&G.cover.hold), sloppy:!!G.sloppy}),
+  arms:()=>allSoldiers().map(s=>({x:s.x,y:s.y,face:s.face,arm:G.cover? (s.arm||null) : null})),
+  visual:()=>allSoldiers().map(s=>{ const o=visOff(s); return {x:s.x,y:s.y,vx:s.x+o[0],vy:s.y+o[1],df:o[2]}; }),
+  isBareExec,
   // tests: skip the fall-in run
-  formNow(){ if(G.phase==='scatter') startFallIn(); if(G.phase==='forming'){ for(const s of allSoldiers()){ s.arrived=true; s.x=s.slot.x; s.y=s.slot.y; } if(G.sgt) G.sgt.arrived=true; finishFallIn(); } },
+  formNow(){ if(G.phase==='scatter') startFallIn(); if(G.phase==='forming'){ for(const s of allSoldiers()){ s.arrived=true; const tg=slotTarget(s); s.x=tg.x; s.y=tg.y; } if(G.sgt) G.sgt.arrived=true; finishFallIn(); } },
   sgtRaw:()=>G.sgt && {x:G.sgt.x,y:G.sgt.y,face:G.sgt.face,corner:G.sgt.corner,run:!!G.sgt.run,post:G.sgt.post}, bounds:()=>scatterBounds(),
   sgt(){ const S=G.sgt; if(!S) return null; const fr=sgtFrame(S.ccH); const u=(S.x-fr.cx)*fr.d[0]+(S.y-fr.cy)*fr.d[1], v=(S.x-fr.cx)*fr.n[0]+(S.y-fr.cy)*fr.n[1];
     const [tx,ty]=sgtTarget(fr); let md=1e9; for(const s of fr.sol) md=Math.min(md,Math.hypot(s.x-S.x,s.y-S.y));

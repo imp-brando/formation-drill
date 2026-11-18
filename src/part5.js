@@ -40,6 +40,15 @@ function draw(phase){
   }
   for(let r=F.ranks.length-1;r>=0;r--) F.ranks[r].sol.forEach((s,sq)=>{ if(s) drawSoldier(s, phase, sq); });
   if(G.sgt && G.mode!=="practice") drawSergeant(G.sgt);
+  if(G.phase && G.phase!=="formed"){                                   // on-field prompt before the formation exists
+    ctx.setTransform(1,0,0,1,0,0);
+    const txt = G.phase==="scatter" ? "Call: FALL IN" : (G.dressT ? "Dress right… ready front" : "Falling in: DOUBLE TIME");
+    const fs=Math.round(Math.min(W,H)*0.07); ctx.font=`bold ${fs}px system-ui`; ctx.textAlign="center"; ctx.textBaseline="middle";
+    const tw=ctx.measureText(txt).width, y=H*0.42;
+    ctx.fillStyle="rgba(20,24,8,.72)"; ctx.fillRect(W/2-tw/2-fs*0.6, y-fs*0.85, tw+fs*1.2, fs*1.7);
+    ctx.fillStyle="#ffd27a"; ctx.fillText(txt, W/2, y); ctx.textAlign="start"; ctx.textBaseline="alphabetic";
+    ctx.setTransform(sc,0,0,sc,view.ox,view.oy);
+  }
   if(window.__trace && window.__trace.length>1){                // test-only: drill sergeant path overlay
     ctx.strokeStyle="rgba(200,30,30,.85)"; ctx.lineWidth=0.09; ctx.beginPath();
     window.__trace.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.stroke();
@@ -48,8 +57,9 @@ function draw(phase){
 }
 /** The drill sergeant: larger, darker blouse, campaign hat (wide brim, Montana peak). Legs swing whenever he walks. */
 function drawSergeant(S){
-  const full=G.tempo==="double"?1.2:1.0, amp=clamp(S.spd/full,0,1.25);
-  const ph=S.phase||0, walking=amp>0.08, mark=!walking && marching() && G.move==="mark";
+  const pre = G.phase && G.phase!=="formed";
+  const full=G.tempo==="double"?1.2:1.0, amp=pre? clamp(S.spd,0,1.25) : clamp(S.spd/full,0,1.25);
+  const ph=pre? (S.walkPh||0) : (S.phase||0), walking=amp>0.08, mark=!pre && !walking && marching() && G.move==="mark";
   const k=(G.mode==="snake"?1.4:1.25)*1.25;
   ctx.save(); ctx.translate(S.x,S.y); ctx.scale(k,k);
   drawBody(0,0,S.face, walking?amp:0, (walking||mark)?ph:0, "#2c3514","#0b0d03", {posture:"attention", lift: mark?1:0});
@@ -70,9 +80,11 @@ function drawRecruit(rc){
 /** A soldier: a helmet dot with two clearly visible legs and boots, swinging on the beat.
     Stride length = the soldier's real displacement, so pivot-file half steps are visibly short. */
 function drawSoldier(s, phase, sq){
+  const pre = G.phase && G.phase!=="formed" && !s.arrived;        // strolling / double-timing to his place
+  if(pre) phase=s.walkPh||0;
   const full = G.tempo==="double"?1.2:1.0;
-  const amp = clamp(s.spd/full, 0, 1.25);
-  const halted = G.move==="halt" && F.mode!=="counter";
+  const amp = pre ? clamp(s.spd,0,1.25) : clamp(s.spd/full, 0, 1.25);
+  const halted = !pre && ((G.move==="halt" && F.mode!=="counter") || (G.phase && G.phase!=="formed"));
   const inPlace = !halted && marching() && amp<0.2;            // mark time, pivot, closing, waiting rank
   const rightFile = sq===F.W-1;
   const k = G.mode==="snake" ? 1.4 : 1.25;                   // sprites scaled up within the step so legs stay readable on the bigger field
@@ -353,6 +365,13 @@ function onCommandHeard(p, raw){
 }
 function judge(p, raw, heardAt, typed){
   const c=p.cmd, S=SENS[settings.sens];
+  // No formation yet: only FALL IN counts (a one-part call here, no inflection check); every other
+  // command is ignored with a quiet hint.
+  if(G.phase && G.phase!=="formed" && G.mode!=="practice"){
+    if(c.id==="fallin" && G.phase==="scatter"){ lastAnalysis={ok:true,detail:"Fall in"}; startFallIn(); return; }
+    $("detail").textContent = G.phase==="scatter" ? "Call FALL IN to form up" : "Falling in… wait until they're formed";
+    return;
+  }
   const a = c.single? {ok:true, detail:"One-part command (no inflection needed)"} : typed? {ok:true, detail:"Typed (debug): inflection skipped"} : analyseInflection(c, heardAt);
   lastAnalysis=a;
   if(G.mode==="practice"){ reportVerdict(c,a,footCheck(c,a)); return; }
@@ -608,6 +627,7 @@ function step(t){
   if(G.mode!=="practice") advance(dtBeats);
   layoutSoldiers(dtBeats,false);
   if(G.mode!=="practice") sgtUpdate(dt);
+  scatterUpdate(dt);
   snakeRules();
   const frac=clamp((t-clock.lastT)/clock.period,0,1);
   const phase=(footOf(clock.k-1)==="L"?0:1)+frac;           // beats since the last LEFT strike
@@ -626,9 +646,9 @@ async function begin(mode){
   else meterOffReason="Voice meter unavailable in this browser";
   if(!recOn) startRecognition(); else restartRec();
   show("game"); resize();      // size the canvas first: the Snake field is fitted to it
-  newGame(mode);
+  newGame(mode,{scatter:true});
   if(mode==="practice"){ G.move="mark"; flash("INFLECTION PRACTICE","ok",'Say any command, e.g. "Column right… MARCH!" Watch the meter.'); }
-  else flash(mode==="snake"?"SNAKE: FALL IN":"DRILL FIELD","ok",`Say "Forward… MARCH!" to step off.`);
+  else flash(mode==="snake"?"SNAKE: CALL FALL IN":"DRILL FIELD: CALL FALL IN","ok",`Your soldiers are scattered. Say "Fall in" to form them up, then "Forward… MARCH!" to step off.`);
   if(!SR) $("detail").textContent="Speech recognition isn't supported in this browser. Only the inflection meter works.";
   clock.lastT=now(); clock.nextT=now()+clock.period; lastFrame=now();
   if(!running){ running=true; requestAnimationFrame(frame); }
@@ -694,7 +714,9 @@ $("trainRec").onclick=()=>{
   try{ r.start(); }catch(_){ $("trainHeard").textContent="Couldn't start the mic. Tap again."; }
 };
 $("btnQuit").onclick=()=>{ running=false; cadStop(); stopListening("🎙 Mic off"); show("start"); $("hiStart").textContent=hiScore; };
-$("ovBtn").onclick=async()=>{ fallIn(); await resumeListening(); };   // a tap (user gesture) turns the mic back on
+$("ovBtn").onclick=async()=>{                                       // a tap (user gesture) turns the mic back on
+  newGame(G.mode,{scatter:true}); flash("CALL FALL IN","ok",'Soldiers are scattered again. Say "Fall in" to form them up.');
+  await resumeListening(); };
 $("cadToggle").onclick=()=>$("cadBar").classList.toggle("collapsed");
 $("cadPlay").onclick=()=>cad.on?cadStop():cadStart();
 $("cadSel").onchange=()=>{ if(cad.on) cadStart(); else { cad.item=FormationCadences.all().find(c=>c.id===$("cadSel").value); cad.line=0; renderCad(); } };
@@ -718,7 +740,7 @@ window.FG = {
   fuzzy:(t,c)=>fuzzyParse(t,{debug:true,clarity:c}), phonKey:w=>phonKey(w), trainLearn:(id,a)=>trainLearn(id,a), aliases:()=>userAliases,
   cmd(text){ const p=parseCommand(text); if(!p) return "invalid"; judge(p,text,now(),true); return p.cmd.id; },
   /** Start a mode without mic/speech (headless): */
-  startHeadless(mode){ show("game"); resize(); newGame(mode); clock.lastT=now(); clock.nextT=now()+clock.period; lastFrame=now(); },
+  startHeadless(mode, scatter){ show("game"); resize(); newGame(mode,{scatter:!!scatter}); clock.lastT=now(); clock.nextT=now()+clock.period; lastFrame=now(); },
   /** Advance the simulation by ms in 16 ms steps (virtual time), then render. */
   sim(ms){ let t=lastFrame; const end=t+ms; while(t<end){ t+=16; simNow=t; step(t); } },
   state:()=>({move:G.move, tempo:G.tempo, fmode:F.mode, W:F.W, ranks:F.ranks.length, busy:G.busy, over:G.over, score:G.score, posture:G.posture,
@@ -727,6 +749,10 @@ window.FG = {
   setRecOn(v){ recOn=v; },
   now(){ return now(); },
   addRecruit(){ addRecruitToFormation(); },
+  phase:()=>G.phase,
+  // tests: skip the fall-in run
+  formNow(){ if(G.phase==='scatter') startFallIn(); if(G.phase==='forming'){ for(const s of allSoldiers()){ s.arrived=true; s.x=s.slot.x; s.y=s.slot.y; } if(G.sgt) G.sgt.arrived=true; finishFallIn(); } },
+  sgtRaw:()=>G.sgt && {x:G.sgt.x,y:G.sgt.y,face:G.sgt.face,corner:G.sgt.corner,run:!!G.sgt.run,post:G.sgt.post}, bounds:()=>scatterBounds(),
   sgt(){ const S=G.sgt; if(!S) return null; const fr=sgtFrame(S.ccH); const u=(S.x-fr.cx)*fr.d[0]+(S.y-fr.cy)*fr.d[1], v=(S.x-fr.cx)*fr.n[0]+(S.y-fr.cy)*fr.n[1];
     const [tx,ty]=sgtTarget(fr); let md=1e9; for(const s of fr.sol) md=Math.min(md,Math.hypot(s.x-S.x,s.y-S.y));
     return {x:+S.x.toFixed(2), y:+S.y.toFixed(2), h:Math.round((fr.h/D2R%360+360)%360), out:+(fr.vmin-v).toFixed(2), depthOff:+(u-(fr.umin+fr.umax)/2).toFixed(2),

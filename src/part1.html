@@ -95,7 +95,7 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
   <div id="noSR" class="notice"><b>Speech recognition isn't available in this browser.</b> Use Chrome on Android, or Safari on iOS 14.5 or later, over HTTPS. Inflection Practice still works.</div>
   <div id="noMic" class="notice"></div>
   <div class="card">
-    <b>Command your formation by voice.</b> Give the <b>preparatory command</b> ("Column right…"), then <b>emphasize the command of execution</b> ("MARCH!"). Make it louder, change your pitch on it, or pause briefly before it.<br>
+    <b>To start, say "Fall in."</b> Your soldiers begin scattered across the field; calling <b>FALL IN</b> forms them up at attention. Then say <b>"Forward… MARCH!"</b> to step off.<br><b>Command your formation by voice.</b> Give the <b>preparatory command</b> ("Column right…"), then <b>emphasize the command of execution</b> ("MARCH!"). Make it louder, change your pitch on it, or pause briefly before it.<br>
     <b>Recruit:</b> any one of those counts. <b>Soldier:</b> any two. <b>Drill Sergeant:</b> all of them, plus a short, sharp execution called on the correct foot. <b>Commands only:</b> no voice check, for warm-up.
   </div>
   <div class="card row" style="justify-content:space-between">
@@ -141,8 +141,8 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
     <button id="btnRef">Command Reference</button>
   </div>
   <div class="card" style="font-size:12px">
-    <b>Quick list:</b> Forward, MARCH · Platoon, HALT · Column right/left, MARCH · Column half right/left, MARCH · Right/Left flank, MARCH · Rear, MARCH · Counter column, MARCH · Mark time, MARCH · Half step, MARCH · Quick/Double time, MARCH · Change step, MARCH · Right/Left step, MARCH · Backward, MARCH · Right/Left/About, FACE · Parade, REST · Stand at, EASE · AT EASE · Platoon, ATTENTION · Dress right, DRESS · Eyes, RIGHT · Ready, FRONT · Open/Close ranks, MARCH · Extend/Close, MARCH · Fall, IN.
-    <br><br><b>Snake:</b> pick up recruits (gold) to grow the formation. Marching into a wall or into your own formation = <b>FORMATION BROKE</b>.
+    <b>Quick list:</b> <b>Fall, IN (start here)</b> · Forward, MARCH · Platoon, HALT · Column right/left, MARCH · Column half right/left, MARCH · Right/Left flank, MARCH · Rear, MARCH · Counter column, MARCH · Mark time, MARCH · Half step, MARCH · Quick/Double time, MARCH · Change step, MARCH · Right/Left step, MARCH · Backward, MARCH · Right/Left/About, FACE · Parade, REST · Stand at, EASE · AT EASE · Platoon, ATTENTION · Dress right, DRESS · Eyes, RIGHT · Ready, FRONT · Open/Close ranks, MARCH · Extend/Close, MARCH.
+    <br><br><b>Snake:</b> soldiers start scattered; say <b>"Fall in"</b> to form up (bumping walls before that doesn't count). Then pick up recruits (gold) to grow the formation. Marching into a wall or into your own formation = <b>FORMATION BROKE</b>.
     <br>High score: <b id="hiStart">0</b>
   </div>
 </section>
@@ -188,11 +188,11 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
     <div id="picaa" title="Preparatory command · Intermediate (thinking) step · Command of execution · Additional step · Action step"><b>P</b><b>I</b><b>C</b><b>A</b><b>A</b></div><canvas id="field"></canvas>
     <div id="footInd"><span id="fL">LEFT</span><span id="fR">RIGHT</span></div>
     <div id="stateTag">AT THE HALT</div>
-    <div id="overlay"><h2 id="ovTitle">Formation broke</h2><div id="ovText"></div><button class="primary" id="ovBtn">Fall in (restart)</button><div style="font-size:12px;color:var(--khaki)">🎙 Mic is off. Tap to fall in.</div></div>
+    <div id="overlay"><h2 id="ovTitle">Formation broke</h2><div id="ovText"></div><button class="primary" id="ovBtn">Restart</button><div style="font-size:12px;color:var(--khaki)">🎙 Mic is off. Tap to restart, then call FALL IN.</div></div>
   </div>
   <div id="panel">
     <canvas id="meter" width="500" height="84"></canvas>
-    <div id="verdict">Waiting for command…</div>
+    <div id="verdict">Say "Fall in" to form up</div>
     <div id="detail"></div>
     <div class="row" style="flex-wrap:nowrap;gap:6px">
       <div style="flex:1;min-width:0">

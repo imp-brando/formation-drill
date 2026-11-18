@@ -17,6 +17,11 @@ const mock=eval("("+src.slice(src.indexOf('const mock=()=>{')+'const mock='.leng
  const say=async(t,f=true)=>{ await p.evaluate((t,f)=>{ const r=window.__srs[window.__srs.length-1]; r.emit([[t,f]]); r.end(); },t,f); await new Promise(r=>setTimeout(r,120)); };
  const st=()=>p.evaluate(()=>({status:document.getElementById('srStatus').textContent, heard:document.getElementById('heard').className+"|"+document.getElementById('heardTxt').textContent, verdict:document.getElementById('verdict').textContent, move:FG.G.move, over:FG.G.over}));
  await p.evaluate(()=>{ FG.settings.sens="none"; });
+ // the game starts scattered: chatter and other commands do nothing, "fall in" (by voice) forms them up
+ await say("forward march"); await new Promise(r=>setTimeout(r,700)); let s0=await p.evaluate(()=>({phase:FG.phase(), move:FG.G.move}));
+ await say("call in"); let s1=await p.evaluate(()=>FG.phase());
+ check(s0.phase==="scatter" && s0.move==="halt" && s1==="forming", `scattered start: "forward march" ignored (${s0.phase}/${s0.move}), voice "call in" = FALL IN -> ${s1}`);
+ await p.evaluate(()=>FG.formNow()); await new Promise(r=>setTimeout(r,700));
  await say("fowahd harch"); await new Promise(r=>setTimeout(r,1500));
  let s=await st(); check(s.move==="forward" && /understood as FORWARD, MARCH \(sound-alike\)/.test(s.status), 'drill slur "fowahd harch" steps off: '+s.status);
  const v0=s.verdict;

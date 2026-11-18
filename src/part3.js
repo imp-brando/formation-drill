@@ -300,6 +300,8 @@ function parseExact(text){
   const t=normalizeSpeech(text);
   const tok=t.split(" ").filter(Boolean);
   if(!tok.length) return null;
+  // "Fall in" heard as a rhyme ("call in", "ball in", "paul in"...): only when that is ALL that was said
+  if(/^(?:(?:platoon|squad|unit) )?(?:call|ball|paul|hall|fa|fah|fol|fawl|fallen|full|foll?) (?:in|inn|en|and)$/.test(t+"") || /^(?:(?:platoon|squad|unit) )?(?:call|ball|paul|hall|fa|fah|fol|fawl|full) (?:in|inn|en|and)$/.test(String(text).toLowerCase().replace(/[^a-z ]/g,"").replace(/\s+/g," ").trim())) return {cmd:CMD.fallin, prep:"fall"};
   const last=tok[tok.length-1], tail=tok.slice(-4);
   // one-part and special forms
   if(last==="atease" && !tail.includes("standatease")) return {cmd:CMD.atease, prep:""};

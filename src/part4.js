@@ -37,15 +37,21 @@ function makeFormation(x,y,h,W,count){
 }
 function allSoldiers(){ const out=[]; for(const rk of F.ranks) for(const s of rk.sol) if(s) out.push(s); return out; }
 
-function newGame(mode){
+function newGame(mode, opt){
+  opt=opt||{};
   G = { mode, score:0, recruits:[], over:false, move:"halt", tempo:"quick", posture:"attention",
-        dress:false, eyes:false, sched:[], hitch:false, busy:null, prevMove:"forward", bpmBase: mode==="snake"?112:120 };
+        dress:false, eyes:false, sched:[], hitch:false, busy:null, prevMove:"forward", bpmBase: mode==="snake"?112:120,
+        phase:"formed" };
   soldierId=0;
-  if(mode==="snake"){ pickSnakeField(); F=makeFormation(SNAKE_W/2, SNAKE_H-6, 0, 4, 16); }   // 4 x 4 platoon to start
+  if(mode==="snake"){ pickSnakeField();
+    // after a scattered start they fall in mid-field (shorter run for everyone, plenty of room ahead)
+    F=makeFormation(SNAKE_W/2, opt.scatter? Math.round(SNAKE_H*0.6) : SNAKE_H-6, 0, 4, 16); }   // 4 x 4 platoon to start
   else F=makeFormation(0,0,0,4, mode==="drill"?16:4);
   layoutSoldiers(0,true);
   sgtInit();
-  if(mode==="snake"){ spawnRecruit(); spawnRecruit(); spawnRecruit(); }   // three recruits out at once on the big field
+  // Snake and Drill Practice start with the soldiers scattered, strolling; "Fall in" forms them up
+  if(opt.scatter && mode!=="practice") scatterStart();
+  else if(mode==="snake") spawnRecruits();
   cam.x=0; cam.y=0;
   $("overlay").classList.remove("on");
   updateHUD(); setStateTag();
@@ -282,6 +288,7 @@ function finishCounterColumn(){
 }
 
 function fallIn(){ newGame(G.mode); flash("FALL IN","ok","Formed in column at attention"); }
+function spawnRecruits(){ spawnRecruit(); spawnRecruit(); spawnRecruit(); }   // three recruits out at once on the big field
 
 /* ======================================================================
    FILES AND SQUARE PIVOTS
@@ -336,7 +343,7 @@ function onNewestSeg(fs){ return fs.seg===F.path.last || fileInfo().idx.get(fs.s
    MOVEMENT UPDATE (called every frame with elapsed time in beats)
 ====================================================================== */
 function advance(dtBeats){
-  if(G.over) return;
+  if(G.over || G.phase!=="formed") return;
   const dist=strideNow()*dtBeats;
   if(F.mode==="counter"){ advanceCounter(dist); return; }
   if(G.move==="rstep"||G.move==="lstep"||G.move==="back"){
@@ -390,6 +397,7 @@ function markPivot(sol, q, oldH, front){
 
 /** Each soldier's displayed position and facing (with transitions), plus measured step speed. */
 function layoutSoldiers(dtBeats, snap){
+  if(G && G.phase && G.phase!=="formed") return;          // scattered / falling in: positions handled by scatterUpdate
   const t=now();
   F.ranks.forEach((rk,r)=>rk.sol.forEach((s,sq)=>{
     if(!s) return;
@@ -442,7 +450,7 @@ function placeRecruit(s, q, rk){
   s.x=p.x; s.y=p.y; s.face=p.h; s.px=null; s.py=null;
 }
 function snakeRules(){
-  if(G.mode!=="snake"||G.over) return;
+  if(G.mode!=="snake"||G.over||G.phase!=="formed") return;   // no formation yet: walls and bumps never break it
   const sol=allSoldiers();
   if(!window.__noWalls) for(const s of sol) if(s.x<0.25||s.x>SNAKE_W-0.25||s.y<0.25||s.y>SNAKE_H-0.25) return broke("You marched into the wall");
   // own formation: front rank vs every rank from the 3rd back (off during maneuvers)
@@ -531,6 +539,7 @@ function sgtWaypoint(fr,S,T){
 }
 function sgtUpdate(dt){
   if(!G.sgt) return sgtInit();
+  if(G.phase!=="formed"){ G.sgt.spd=0; return; }            // he waits on his post where the formation will form
   const S=G.sgt;
   // counter column: head for the NEW left side (the formation will face the other way) during the maneuver
   if(F.mode==="counter"){ if(S.ccH===undefined) S.ccH=S.h+Math.PI; } else S.ccH=undefined;
@@ -568,4 +577,135 @@ function sgtUpdate(dt){
   S.px=S.x; S.py=S.y; S.route=route;
   const want = (route==="around" && dist>0.3) ? Math.atan2(dx,-dy) : fr.h;
   let da=((want-S.face)%(2*Math.PI)+3*Math.PI)%(2*Math.PI)-Math.PI; S.face+=da*Math.min(1,dt/120);
+}
+
+/* ======================================================================
+   BEFORE "FALL IN": soldiers scattered, strolling at random (no formation, so nothing can break).
+   On FALL IN the base soldier (front rank, right file) sets first; the others hurry to their
+   places on him, face front, dress right, ready front. Only then does the formation exist.
+====================================================================== */
+const STROLL_SPS=0.75, FORM_SPS=3.6;            // strolling; falling in at DOUBLE TIME (180 steps/min x 36-inch steps = 3.6 steps/s)
+const DT_STRIDE=1.2;                             // double-time stride (36 in) in 30-inch steps
+function scatterBounds(){
+  return G.mode==="snake" ? {x0:1, y0:1, x1:SNAKE_W-1, y1:SNAKE_H-1} : {x0:-9, y0:-13, x1:9, y1:9};
+}
+function scatterStart(){
+  G.phase="scatter"; G.recruits=[];
+  const b=scatterBounds(), sol=allSoldiers(), placed=[];
+  // the drill sergeant waits in a random corner, standing still, watching the soldiers
+  if(G.sgt){ const S=G.sgt; S.post={x:S.x,y:S.y,h:S.h};
+    const c=Math.floor(Math.random()*4), m=1.3;
+    S.x = (c&1)? b.x1-m : b.x0+m; S.y = (c&2)? b.y1-m : b.y0+(G.mode==="snake"? 4.5 : m+2); S.px=S.x; S.py=S.y; S.spd=0; S.corner=c; S.arrived=false; }   // top corners: clear of the on-field buttons
+  // each soldier remembers his formation slot (where layoutSoldiers just put him)
+  for(const s of sol){
+    let x,y,ok=false;
+    for(let i=0;i<400 && !ok;i++){ x=b.x0+0.5+Math.random()*(b.x1-b.x0-1); y=b.y0+0.5+Math.random()*(b.y1-b.y0-1);
+      ok = placed.every(p=>Math.hypot(p[0]-x,p[1]-y)>1.6) && !(G.sgt && Math.hypot(G.sgt.x-x,G.sgt.y-y)<2.5); }
+    placed.push([x,y]);
+    const h=Math.random()*Math.PI*2;
+    s.x=x; s.y=y; s.face=h; s.px=null; s.py=null; s.spd=0; s.trans=null; s.faceAnim=null;
+    s.wander={h, v:STROLL_SPS*(0.6+Math.random()*0.6), turnAt:now()+1000+Math.random()*3000, pauseUntil:0}; s.walkPh=Math.random()*2;
+  }
+}
+/** "Fall in" during the scatter: assign slots (nearest soldier to the base slot first), then hurry in. */
+function startFallIn(){
+  if(G.phase!=="scatter") return false;
+  G.phase="forming"; G.formT0=now();
+  const slots=[];
+  F.ranks.forEach((rk,r)=>rk.sol.forEach((s,q)=>{ if(s){ const p=filePos(q,rk.fs[q]); slots.push({r,q,x:p.x,y:p.y,h:p.h}); } }));
+  const base=slots.find(z=>z.r===0 && z.q===F.W-1) || slots[0];
+  slots.sort((a,b)=>Math.hypot(a.x-base.x,a.y-base.y)-Math.hypot(b.x-base.x,b.y-base.y));   // base first, then outward
+  const free=allSoldiers();
+  for(const z of slots){
+    let bi=0, bd=1e9; free.forEach((s,i)=>{ const d=Math.hypot(s.x-z.x,s.y-z.y); if(d<bd){bd=d;bi=i;} });
+    const s=free.splice(bi,1)[0]; F.ranks[z.r].sol[z.q]=s;
+    s.slot=z; s.arrived=false; s.isBase=(z===base); s.wander=null;
+    s.goAt = now() + (s.isBase? 0 : 250 + Math.random()*350);                // the base moves out first (double time)
+  }
+  if(G.sgt) G.sgt.goAt=now()+150;
+  flash("FALL IN","ok","Double time! The base soldier sets; the rest fall in on him");
+  return true;
+}
+function scatterUpdate(dt){
+  if(!G.phase || G.phase==="formed") return;
+  const t=now(), sol=allSoldiers(), b=scatterBounds(), sec=dt/1000;
+  for(const s of sol){
+    let vx=0, vy=0;
+    if(G.phase==="scatter"){
+      const w=s.wander;
+      if(t>w.turnAt){                                                 // wander: turn a little, sometimes stop to look around
+        if(Math.random()<0.25) w.pauseUntil=t+800+Math.random()*1800;
+        w.h+=(Math.random()-0.5)*Math.PI*0.9; w.turnAt=t+1500+Math.random()*3500;
+      }
+      if(t>=w.pauseUntil){
+        // walls: turn back toward the field before touching them
+        const m=0.8;
+        if(s.x<b.x0+m) w.h=Math.PI/2+(Math.random()-0.5); else if(s.x>b.x1-m) w.h=-Math.PI/2+(Math.random()-0.5);
+        if(s.y<b.y0+m) w.h=Math.PI+(Math.random()-0.5); else if(s.y>b.y1-m) w.h=(Math.random()-0.5);
+        const d=dirV(w.h); vx=d[0]*w.v; vy=d[1]*w.v;
+      }
+      for(const o of sol){ if(o===s) continue; const ex=s.x-o.x, ey=s.y-o.y, e=Math.hypot(ex,ey);
+        if(e<1.3 && e>1e-6){ const k=(1.3-e)*0.9; vx+=ex/e*k; vy+=ey/e*k; } }   // drift apart loosely
+      if(G.sgt){ const ex=s.x-G.sgt.x, ey=s.y-G.sgt.y, e=Math.hypot(ex,ey); if(e<1.4 && e>1e-6){ vx+=ex/e*(1.4-e); vy+=ey/e*(1.4-e); } }
+    } else {                                                          // forming
+      if(s.arrived){ s.x=s.slot.x; s.y=s.slot.y; }
+      else if(t>=s.goAt){
+        const dx=s.slot.x-s.x, dy=s.slot.y-s.y, d=Math.hypot(dx,dy);
+        if(d<0.06){ s.arrived=true; s.x=s.slot.x; s.y=s.slot.y; }
+        else {
+          const v=Math.min(FORM_SPS, d/sec*0.9); vx=dx/d*v; vy=dy/d*v;
+          for(const o of sol){ if(o===s) continue; const ex=s.x-o.x, ey=s.y-o.y, e=Math.hypot(ex,ey);   // sidestep others
+            if(e<0.7 && e>1e-6 && d>0.8){ const k=(0.7-e)*3; vx+=ex/e*k; vy+=ey/e*k; } }
+        }
+      }
+    }
+    s.x+=vx*sec; s.y+=vy*sec;
+    if(G.mode==="snake"){ s.x=clamp(s.x,0.35,SNAKE_W-0.35); s.y=clamp(s.y,0.35,SNAKE_H-0.35); }
+    const sp=Math.hypot(vx,vy), running=G.phase==="forming" && sp>1.2;
+    s.run=running;
+    s.spd=lerp(s.spd||0, running? 1.15 : Math.min(sp/1.6,1), .25);   // leg swing: strolling short, double time full
+    s.walkPh=((s.walkPh||0)+(running? 3*sec : sp*sec/0.5))%2;       // own stride: strolling ~1.5/s, double time exactly 3/s (180/min)
+    // face where he walks; once in his place, face the formation's front
+    const want = (G.phase==="forming" && (s.arrived || Math.hypot(s.slot.x-s.x,s.slot.y-s.y)<0.4)) ? s.slot.h : (sp>0.05 ? Math.atan2(vx,-vy) : s.face);
+    let da=((want-s.face)%(2*Math.PI)+3*Math.PI)%(2*Math.PI)-Math.PI; s.face+=da*Math.min(1,dt/180);
+    s.px=s.x; s.py=s.y;
+  }
+  sgtPreFormUpdate(dt);
+  if(G.phase==="forming" && sol.every(s=>s.arrived) && (!G.sgt || G.sgt.arrived) && !G.dressT){
+    G.dressT=t; G.dress=true; G.eyes=true; setStateTag(); flash("DRESS RIGHT","ok","Dressing on the right file…");
+  }
+  if(G.dressT && t-G.dressT>1400){ finishFallIn(); }
+}
+function finishFallIn(){
+  G.dress=false; G.eyes=false; G.dressT=null; G.phase="formed";
+  for(const s of allSoldiers()){ s.face=s.slot? s.slot.h : s.face; s.slot=null; s.arrived=null; s.wander=null; s.spd=0; s.px=null; s.py=null; }
+  layoutSoldiers(0,true);
+  if(G.sgt){ const S=G.sgt; S.vf=[0,0]; S.lc=null; S.run=false; S.spd=0; S.goAt=null; if(S.post){ S.x=S.post.x; S.y=S.post.y; S.face=S.post.h; S.px=S.x; S.py=S.y; } S.post=null; }
+  if(G.mode==="snake") spawnRecruits();
+  updateHUD(); setStateTag();
+  flash("FORMED UP","ok",'Standing at attention. Say "Forward… MARCH!" to step off.');
+}
+
+/** Drill sergeant before the formation exists: still in his corner watching the group; on FALL IN he
+    double-times to his post on the formation's LEFT flank, centred. */
+function sgtPreFormUpdate(dt){
+  const S=G.sgt; if(!S || !S.post) return;
+  const sol=allSoldiers(), sec=dt/1000;
+  let cx=0, cy=0; sol.forEach(o=>{cx+=o.x; cy+=o.y;}); cx/=sol.length||1; cy/=sol.length||1;
+  let want=S.face, vx=0, vy=0;
+  if(G.phase==="scatter") want=Math.atan2(cx-S.x, -(cy-S.y));               // watching the group
+  else if(!S.arrived && now()>=(S.goAt||0)){
+    const dx=S.post.x-S.x, dy=S.post.y-S.y, d=Math.hypot(dx,dy);
+    if(d<0.06){ S.arrived=true; S.x=S.post.x; S.y=S.post.y; }
+    else { const v=Math.min(FORM_SPS, d/sec*0.9); vx=dx/d*v; vy=dy/d*v;
+      for(const o of sol){ const ex=S.x-o.x, ey=S.y-o.y, e=Math.hypot(ex,ey);
+        if(e<0.8 && e>1e-6 && d>0.9){ const k=(0.8-e)*3; vx+=ex/e*k; vy+=ey/e*k; } }
+      want=Math.atan2(vx,-vy); }
+  }
+  if(S.arrived) want=S.post.h;
+  S.x+=vx*sec; S.y+=vy*sec;
+  const sp=Math.hypot(vx,vy); S.run=sp>1.2;
+  S.spd=lerp(S.spd||0, S.run?1.15:0, .25); S.walkPh=((S.walkPh||0)+(S.run? 3*sec : 0))%2;
+  let da=((want-S.face)%(2*Math.PI)+3*Math.PI)%(2*Math.PI)-Math.PI; S.face+=da*Math.min(1,dt/200);
+  S.px=S.x; S.py=S.y;
 }

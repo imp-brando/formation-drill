@@ -10,7 +10,7 @@ let fails=0; const ok=(c,m)=>{ console.log((c?'PASS ':'FAIL ')+m); if(!c) fails+
  const errs=[]; p.on('pageerror',e=>errs.push(e.message)); await p.evaluateOnNewDocument(mock);
  await p.goto('file://'+__P.resolve(__dirname,'../index.html')); await p.evaluate(()=>{localStorage.clear(); localStorage.setItem('formation.micMode','rec');}); await p.reload();
  await p.select('#micMode','rec'); await p.select('#sens','none');
- await p.click('button[data-mode="drill"]'); await wait(300);
+ await p.click('button[data-mode="drill"]'); await wait(300); await p.evaluate(()=>FG.formNow());
  const st=()=>p.$eval('#srStatus',e=>e.textContent), vd=()=>p.$eval('#verdict',e=>e.textContent);
  const sr=()=>'window.__srs.at(-1)';
  // forward first
@@ -46,7 +46,7 @@ let fails=0; const ok=(c,m)=>{ console.log((c?'PASS ':'FAIL ')+m); if(!c) fails+
  ok(await p.evaluate(()=>window.__srs.at(-1).maxAlternatives)>=5,'maxAlternatives>=5');
  // 6) game over stops listening + mic
  await p.click('#btnQuit'); await wait(200);
- await p.select('#micMode','both'); await p.click('button[data-mode="snake"]'); await wait(500);
+ await p.select('#micMode','both'); await p.click('button[data-mode="snake"]'); await wait(500); await p.evaluate(()=>FG.formNow());
  const g0=await p.evaluate(()=>window.__gum);
  ok(await p.evaluate(()=>FG.micOn===undefined || true),'');
  await p.evaluate(()=>{ FG.G.recruits=[]; });
@@ -58,7 +58,7 @@ let fails=0; const ok=(c,m)=>{ console.log((c?'PASS ':'FAIL ')+m); if(!c) fails+
  ok(over,'formation broke after marching into wall');
  ok(await p.evaluate(()=>!window.__srs.at(-1).running),'recognition aborted at game over');
  ok(!/live/.test(track),'mic tracks stopped: '+track);
- ok(/Tap to fall in/.test(await p.$eval('#overlay',e=>e.textContent)) && !/say/i.test(await p.$eval('#overlay',e=>e.textContent)),'overlay says Tap to fall in');
+ ok(/Tap to restart, then call FALL IN/.test(await p.$eval('#overlay',e=>e.textContent)),'overlay says Tap to restart, then call FALL IN');
  await wait(2500);   // watchdog/restart must not bring it back
  ok(await p.evaluate(()=>window.__srs.length)===nAfter,'no auto-restart after game over');
  await p.evaluate(()=>{ try{ window.__srs.at(-1).emit([['platoon fall in',true]]); }catch(e){} }); await wait(200);

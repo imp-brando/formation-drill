@@ -10,7 +10,7 @@ const mock=eval("("+src.slice(src.indexOf('const mock=()=>{')+'const mock='.leng
  await p.evaluateOnNewDocument(mock); await p.goto('file://'+P.resolve(__dirname,'../index.html'));
  await p.evaluate(()=>{ localStorage.clear(); localStorage.setItem("formation.coexist","no"); }); await p.reload();
  let fails=0; const check=(ok,msg)=>{ console.log((ok?'PASS ':'FAIL ')+msg); if(!ok) fails++; };
- await p.click('[data-mode="drill"]'); await new Promise(r=>setTimeout(r,500));
+ await p.click('[data-mode="drill"]'); await new Promise(r=>setTimeout(r,500)); await p.evaluate(()=>FG.formNow());
  const step=async(fn,arg)=>p.evaluate(fn,arg);
  const st=await step(async()=>{
    const R=()=>window.__srs[window.__srs.length-1];

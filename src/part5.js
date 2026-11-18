@@ -39,6 +39,23 @@ function draw(phase){
     for(let y=Math.floor(y0);y<=y1;y++){ ctx.strokeStyle= y%5===0?"rgba(230,220,195,.22)":"rgba(0,0,0,.07)"; ctx.beginPath(); ctx.moveTo(x0,y); ctx.lineTo(x1,y); ctx.stroke(); }
   }
   for(let r=F.ranks.length-1;r>=0;r--) F.ranks[r].sol.forEach((s,sq)=>{ if(s) drawSoldier(s, phase, sq); });
+  if(G.sgt && G.mode!=="practice") drawSergeant(G.sgt);
+}
+/** The drill sergeant: larger, darker blouse, campaign hat (wide brim, Montana peak). Legs swing whenever he walks. */
+function drawSergeant(S){
+  const full=G.tempo==="double"?1.2:1.0, amp=clamp(S.spd/full,0,1.25);
+  const ph=S.phase||0, walking=amp>0.08, mark=!walking && marching() && G.move==="mark";
+  const k=(G.mode==="snake"?1.3:1.15)*1.25;
+  ctx.save(); ctx.translate(S.x,S.y); ctx.scale(k,k);
+  drawBody(0,0,S.face, walking?amp:0, (walking||mark)?ph:0, "#2c3514","#0b0d03", {posture:"attention", lift: mark?1:0});
+  const d=dirV(S.face);
+  ctx.fillStyle="#b08a4f"; ctx.strokeStyle="#4a3416"; ctx.lineWidth=0.035;
+  ctx.beginPath(); ctx.arc(0,0,0.27,0,Math.PI*2); ctx.fill(); ctx.stroke();          // brim
+  ctx.fillStyle="#8a6a37"; ctx.beginPath(); ctx.arc(0,0,0.14,0,Math.PI*2); ctx.fill(); ctx.stroke();  // crown
+  ctx.strokeStyle="#4a3416"; ctx.lineWidth=0.03; ctx.beginPath();                    // Montana-peak pinches
+  for(const a of [45,135,225,315]){ const v=dirV(S.face+a*D2R); ctx.moveTo(v[0]*.04,v[1]*.04); ctx.lineTo(v[0]*.12,v[1]*.12); } ctx.stroke();
+  ctx.fillStyle="#e6dcc3"; ctx.beginPath(); ctx.arc(d[0]*.21,d[1]*.21,0.05,0,Math.PI*2); ctx.fill();   // facing marker on the brim
+  ctx.restore();
 }
 function drawRecruit(rc){
   const pulse=.5+.5*Math.sin((now()-rc.t)/250);
@@ -585,9 +602,11 @@ function step(t){
   const dtBeats=dt/clock.period;
   if(G.mode!=="practice") advance(dtBeats);
   layoutSoldiers(dtBeats,false);
+  if(G.mode!=="practice") sgtUpdate(dt);
   snakeRules();
   const frac=clamp((t-clock.lastT)/clock.period,0,1);
   const phase=(footOf(clock.k-1)==="L"?0:1)+frac;           // beats since the last LEFT strike
+  if(G.sgt) G.sgt.phase=phase;
   draw(marching()||G.mode==="practice"?phase:0);
   drawMeter();
 }
@@ -703,6 +722,10 @@ window.FG = {
   setRecOn(v){ recOn=v; },
   now(){ return now(); },
   addRecruit(){ addRecruitToFormation(); },
+  sgt(){ const S=G.sgt; if(!S) return null; const fr=sgtFrame(); const u=(S.x-fr.cx)*fr.d[0]+(S.y-fr.cy)*fr.d[1], v=(S.x-fr.cx)*fr.n[0]+(S.y-fr.cy)*fr.n[1];
+    const [tx,ty]=sgtTarget(fr); let md=1e9; for(const s of fr.sol) md=Math.min(md,Math.hypot(s.x-S.x,s.y-S.y));
+    return {x:+S.x.toFixed(2), y:+S.y.toFixed(2), h:Math.round((fr.h/D2R%360+360)%360), out:+(v-fr.vmax).toFixed(2), depthOff:+(u-(fr.umin+fr.umax)/2).toFixed(2),
+            toTarget:+Math.hypot(tx-S.x,ty-S.y).toFixed(2), minDist:+md.toFixed(2), route:S.route}; },
   frame(db,hz){ pushFrame(now(), db, hz||0); },                  // feed the voice meter (tests)
   meter(on){ micOK=on; if(on) noiseFloor=-60; },
   burst:()=>({armed: armed && {id:armed.cmd.id, src:armed.src}, last: lastBurst && {id:lastBurst.id, onsetT:lastBurst.onsetT}, execMode}),

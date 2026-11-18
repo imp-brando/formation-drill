@@ -26,7 +26,7 @@ const SEQS=[["rflank"],["lflank"],["rflank","lflank"],["lflank","rflank"],["rfla
        if(!nb){ missing++; return; }
        w=Math.max(w, Math.abs(Math.hypot(s.x-nb.x,s.y-nb.y)-1)); }));
      return {worst:+w.toFixed(3), missing}; }
-   say("fwd"); FG.sim(1500); say("colL"); FG.sim(7000);
+   say("fwd"); FG.sim(1500); say("colL"); FG.sim(11000);   // a 6-file line needs ~8 s for the outer file to catch up
    if(FG.G.over) return {over:document.getElementById('ovText').textContent};
    const after=grid();
    function grid(){
@@ -52,7 +52,7 @@ const SEQS=[["rflank"],["lflank"],["rflank","lflank"],["lflank","rflank"],["rfla
   },seq,n,CMDS);
   const g1=r.atHalt||{}, g2=r.after||{};
   // halted mid-turn = a legitimate staircase; the grid check only applies once everyone is on the new heading
-  const ok = !r.over && (g1.recruitErr.worst<0.06 || !g1.straight) && g1.recruitErr.missing===0 && (!g1.straight || (g1.count===8+n && g1.squadsOK && g1.partial<=1)) && g2.straight && g2.count===8+n && g2.worst<0.06 && g2.squadsOK && g2.partial<=1 && !r.pending;
+  const ok = !r.over && (g1.recruitErr.worst<0.06 || !g1.straight) && g1.recruitErr.missing===0 && (!g1.straight || (g1.count===16+n && g1.squadsOK && g1.partial<=1)) && g2.straight && g2.count===16+n && g2.worst<0.06 && g2.squadsOK && g2.partial<=1 && !r.pending;
   if(!ok) fails++;
   console.log((ok?'PASS ':'FAIL ')+(seq.join('+')+' +'+n).padEnd(24), JSON.stringify(r));
  }

@@ -41,9 +41,10 @@ function newGame(mode){
   G = { mode, score:0, recruits:[], over:false, move:"halt", tempo:"quick", posture:"attention",
         dress:false, eyes:false, sched:[], hitch:false, busy:null, prevMove:"forward", bpmBase: mode==="snake"?112:120 };
   soldierId=0;
-  if(mode==="snake"){ pickSnakeField(); F=makeFormation(SNAKE_W/2, SNAKE_H-5, 0, 4, 8); }
+  if(mode==="snake"){ pickSnakeField(); F=makeFormation(SNAKE_W/2, SNAKE_H-6, 0, 4, 16); }   // 4 x 4 platoon to start
   else F=makeFormation(0,0,0,4, mode==="drill"?16:4);
   layoutSoldiers(0,true);
+  sgtInit();
   if(mode==="snake"){ spawnRecruit(); spawnRecruit(); }   // two recruits out at once on the big field
   cam.x=0; cam.y=0;
   $("overlay").classList.remove("on");
@@ -464,4 +465,68 @@ function broke(why){
   $("ovTitle").textContent="Formation broke"; $("ovText").textContent=why+". Score "+G.score+" · High "+hiScore;
   $("overlay").classList.add("on"); chime(false); updateHUD();
   if(typeof stopListening==="function") stopListening();   // recording stops the moment the formation breaks
+}
+
+/* ======================================================================
+   DRILL SERGEANT: centred on the formation's RIGHT side (relative to the way it faces), 2 steps out
+   from the right flank file, at the middle of its depth. Not part of the formation: no walls, no
+   self-collision, can't pick up recruits. He walks in cadence (up to 1.3 steps per beat on post, double-timing up to 2 when relocating) and
+   goes AROUND the end of the formation when the right side changes (rear march, flanks, facings).
+====================================================================== */
+const SGT_OUT=2, SGT_CLEAR=0.8;
+function sgtFrame(){
+  const sol=allSoldiers(); if(!sol.length) return null;
+  let cx=0, cy=0, fx=0, fy=0;
+  for(const s of sol){ cx+=s.x; cy+=s.y; fx+=Math.sin(s.face); fy+=-Math.cos(s.face); }
+  cx/=sol.length; cy/=sol.length;
+  const R=Math.hypot(fx,fy)/sol.length;
+  let h = (G.sgt && (R<0.6 || F.mode==="counter")) ? G.sgt.h : Math.atan2(fx,-fy);   // mixed facings (counter column): keep the last facing
+  if(!G.sgt && R<0.6) h=0;
+  const d=dirV(h), n=nrmV(h);
+  let umin=1e9, umax=-1e9, vmin=1e9, vmax=-1e9;
+  for(const s of sol){ const u=(s.x-cx)*d[0]+(s.y-cy)*d[1], v=(s.x-cx)*n[0]+(s.y-cy)*n[1];
+    umin=Math.min(umin,u); umax=Math.max(umax,u); vmin=Math.min(vmin,v); vmax=Math.max(vmax,v); }
+  return {cx,cy,h,d,n,umin,umax,vmin,vmax,sol};
+}
+const sgtXY=(fr,u,v)=>[fr.cx+fr.d[0]*u+fr.n[0]*v, fr.cy+fr.d[1]*u+fr.n[1]*v];
+function sgtTarget(fr){ return sgtXY(fr,(fr.umin+fr.umax)/2, fr.vmax+SGT_OUT); }
+function sgtInit(){
+  G.sgt=null; const fr=sgtFrame(); if(!fr) return;
+  const [x,y]=sgtTarget(fr);
+  G.sgt={x,y,face:fr.h,h:fr.h,spd:0,px:x,py:y,route:"post"};
+}
+function sgtUpdate(dt){
+  if(!G.sgt) return sgtInit();
+  const S=G.sgt, fr=sgtFrame(); if(!fr) return;
+  S.h=fr.h;
+  const per=clock.period, full=G.tempo==="double"?1.2:1.0;
+  const us=(S.x-fr.cx)*fr.d[0]+(S.y-fr.cy)*fr.d[1], vs=(S.x-fr.cx)*fr.n[0]+(S.y-fr.cy)*fr.n[1];
+  const vt=fr.vmax+SGT_OUT, ut=(fr.umin+fr.umax)/2;
+  let wu=ut, wv=vt, route="post";
+  if(vs < fr.vmax+1.2){                                          // not on the right side: go around an end of the formation
+    const inU = us>fr.umin-1.4 && us<fr.umax+1.4;
+    if(inU){
+      const marchingFwd = marching() && F.mode!=="counter";
+      const rearEnd=fr.umin-1.7, frontEnd=fr.umax+1.7;
+      const end = marchingFwd ? (us>fr.umax ? frontEnd : rearEnd) : (Math.abs(us-rearEnd)<Math.abs(us-frontEnd)? rearEnd : frontEnd);
+      wu=end; wv=vs; route="around";
+    } else { wu=us; wv=vt; route="around"; }
+  }
+  const [tx,ty]=sgtXY(fr,wu,wv);
+  let dx=tx-S.x, dy=ty-S.y; const dist=Math.hypot(dx,dy);
+  // match the formation's pace when on post; walk briskly when relocating
+  const far = route==="around" || dist>1.5;
+  const cap=(far?2.0:1.3)*full*dt/per;                           // on post: up to 1.3 steps/beat; relocating: he double-times
+  const mv=Math.min(dist, cap);
+  if(dist>1e-6){ S.x+=dx/dist*mv; S.y+=dy/dist*mv; }
+  // never stand on a soldier
+  for(let it=0;it<3;it++) for(const s of fr.sol){ const ex=S.x-s.x, ey=S.y-s.y, e=Math.hypot(ex,ey);
+    if(e<SGT_CLEAR){ const k=(SGT_CLEAR-e)/(e||1); S.x+=(e?ex:fr.n[0])*k; S.y+=(e?ey:fr.n[1])*k; } }
+  if(G.mode==="snake"){ S.x=clamp(S.x,0.3,SNAKE_W-0.3); S.y=clamp(S.y,0.3,SNAKE_H-0.3); }  // stays visible; walls only count for soldiers
+  const dtBeats=dt/per;
+  if(dtBeats>0){ const v=Math.hypot(S.x-S.px,S.y-S.py)/dtBeats; S.spd=lerp(S.spd,Math.min(v,2),.25); }
+  S.px=S.x; S.py=S.y; S.route=route;
+  // face where he walks when relocating, else the formation's facing
+  const want = (route==="around" && dist>0.3) ? Math.atan2(dx,-dy) : fr.h;
+  let da=((want-S.face)%(2*Math.PI)+3*Math.PI)%(2*Math.PI)-Math.PI; S.face+=da*Math.min(1,dt/120);
 }

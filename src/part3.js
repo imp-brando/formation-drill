@@ -53,6 +53,7 @@ class Path {
     if(L.len===Infinity){ if(sCut<L.s0) sCut=L.s0; L.len=sCut-L.s0; } else sCut=L.s0+L.len;
     let cur=sCut, p=this.posAt(sCut);
     for(const it of items){
+      if(it.t==="T"){ p={x:p.x,y:p.y,h:p.h+it.d*it.ang}; continue; }   // sharp corner (square pivot)
       if(it.t==="A"){
         const n=nrmV(p.h), seg={t:"A",x:p.x,y:p.y,h:p.h,r:it.r,d:it.d,s0:cur,len:it.ang*it.r,f:it.f??1,
           cx:p.x+it.d*n[0]*it.r, cy:p.y+it.d*n[1]*it.r};
@@ -131,7 +132,7 @@ const CMD = Object.fromEntries(CMDS.map(c=>[c.id,c]));
       for flanks and columns).
 ====================================================================== */
 const EXEC_WORDS = {
-  MARCH:["march","marsh","marge","much","mars","harch","hutch","hut","ho","hoe","hah","huh","arch","mash","match","marched","marching","martch","mosh","hoch","harsh","mach","marches","march's","mush","marsha","mars'","mark","marc","larch","parch","starch","hush","hup","hop","harsh"],
+  MARCH:["march","mar","marsh","marge","much","mars","harch","hutch","hut","ho","hoe","hah","huh","arch","mash","match","marched","marching","martch","mosh","hoch","harsh","mach","marches","march's","mush","marsha","mars'","mark","marc","larch","parch","starch","hush","hup","hop","harsh"],
   HALT:["halt","hold","holt","hall","haul","alt","hault","hult","hoult","halts","holds","hawk","hot","whole","hole","haunt","holt's","halt's"],
   FACE:["face","faith","phase","fase","fays","faced","faces","fate","fake","vase","case","base","space"],
   REST:["rest","wrest","rust","ress","rests","rested","wrist","arrest","west","rast"],

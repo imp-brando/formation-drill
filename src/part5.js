@@ -162,7 +162,7 @@ function makeRec(){
     if(e.error==="network") setStatus("Speech recognition needs an internet connection (network error). Retrying…","bad");
     // "no-speech" and "aborted" are routine; onend restarts
   };
-  r.onend=()=>{ recRunning=false; if(recOn && !ptt) scheduleRestart(lastRecError==="network"?1500:40); };
+  r.onend=()=>{ recRunning=false; if(recOn && !ptt) scheduleRestart(lastRecError==="network"?1500:0); };   // no gap
   return r;
 }
 function startRecognition(){
@@ -225,7 +225,7 @@ function handleResult(e){
       triggerProbe=true;
       const prep=parsePrepOnly(firstFresh);
       if(prep){
-        pendingPrep={text:firstFresh, t:now()};
+        pendingPrep={text:firstFresh, t:now()}; picaaPrep();
         setStatus(`Heard "${top}" → ${prep.name.split(",")[0]}… waiting for ${prep.exec}`, "ok");
       } else {
         setStatus(`Heard "${top}": not a drill command`, "warn");
@@ -332,11 +332,25 @@ function judge(p, raw, heardAt, typed){
   const fc=footCheck(c,a);
   if(fc && fc.wrong && S.foot==="reject") return reportVerdict(c,{ok:false,reason:"Wrong foot",detail:`Call it as the ${fc.want==="L"?"left":"right"} foot strikes`,ex:a.ex,prepSegs:a.prepSegs}, fc);
   // Executed on the next beat; foot-specific commands wait for the correct foot while marching.
-  // Executed on the very next foot strike (TC 3-21.5: movement starts on the step after the command
-  // of execution). No waiting for a particular foot: whether it was called on the right foot is judged above.
-  const k=clock.k;
-  at(k, ()=>{ if(!canExecute(c) || c.id==="fallin") execute(c); });
+  // PICAA: anchor the command of execution to the foot strike it was called on, then one additional
+  // step, then the action step. If it wasn't on the correct foot, use the next correct-foot strike.
+  const kE=anchorBeat(c, a, heardAt);
+  const run=()=>{ if(!canExecute(c) || c.id==="fallin") execute(c, kE); };
+  if(kE<clock.k) run(); else at(kE, run);
   reportVerdict(c, a, fc);
+}
+/* When was the command of execution actually spoken? From the voice meter if it's on, otherwise
+   the recognition time minus Chrome's typical interim-result delay. */
+const EST_REC_LAT=250;
+function anchorBeat(c, a, heardAt){
+  if(!marching() || G.move==="mark") return clock.k;                 // from the halt / mark time: next strike
+  const spokenT = (a && a.ex && a.ex.peakT) ? a.ex.peakT : heardAt-EST_REC_LAT;
+  const kS = footAtTime(spokenT).k;
+  if(c.foot==="L"||c.foot==="R"){
+    if(footOf(kS)===c.foot && kS>=clock.k-1) return kS;              // called on the correct foot
+    return nextBeat(c.foot);                                          // otherwise: next correct-foot strike
+  }
+  return Math.max(kS, clock.k-1);                                     // either foot: the strike it was called on
 }
 function footCheck(c,a){
   if(!(c.foot==="L"||c.foot==="R") || !(marching()||G.mode==="practice") || !a || !a.ex) return null;
@@ -355,6 +369,16 @@ function reportVerdict(c,a,fc){
     el.className="bad"; el.textContent = a.reason.toUpperCase()+": "+c.name;
     $("detail").textContent = (a.hint? a.hint+" " : "") + (a.detail||""); chime(false);
   }
+}
+/* ---------- PICAA beat indicator: Prep · Interval · Command · Additional step · Action step ---------- */
+function picaaSet(st){ const el=$("picaa"); if(!el) return; [...el.querySelectorAll("b")].forEach((sp,i)=>sp.className=st[i]||""); el.classList.toggle("show", st.some(Boolean)); }
+function picaaPrep(){ picaaSet(["on","wait","","",""]); }
+function picaaExec(c,kE,addl){
+  if(c.single) return;
+  const st=["on","on","on", addl?"":"skip", ""]; picaaSet(st);
+  const light=(i,kk)=>{ const f=()=>{ st[i]="on"; picaaSet(st); }; if(kk<clock.k) f(); else at(kk,f); };
+  if(addl){ light(3,kE); light(4,kE+1); } else light(4,kE);
+  at((addl?kE+1:kE)+2, ()=>picaaSet(["","","","",""]));
 }
 function flash(msg,cls,detail){ const el=$("verdict"); el.className=cls; el.textContent=msg; $("detail").textContent=detail||""; }
 
@@ -503,6 +527,7 @@ window.FG = {
              heading:Math.round(((F.mode==="column"?F.path.posAt(F.ranks[0].s).h:0)/D2R%360+360)%360),
              soldiers:allSoldiers().map(s=>[+s.x.toFixed(2),+s.y.toFixed(2),Math.round(((s.face/D2R)%360+360)%360)])}),
   setRecOn(v){ recOn=v; },
+  now(){ return now(); },
   get G(){return G;}, get F(){return F;}, clock, settings, frames, handleResult, get rec(){return rec;}, get sessionText(){return sessionText;},
   analyse:(id,t)=>{ micOK=true; return analyseInflection(CMD[id], t); }, pushFrame, setFloor:v=>{noiseFloor=v;},
   showAnalysis:a=>{ lastAnalysis=a; },

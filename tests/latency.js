@@ -1,3 +1,4 @@
+// NOTE: times the LEFT-most front soldier. For column RIGHT that is the outer file, which (square pivots) marches ~3 steps to its own pivot point. PICAA timing of the pivot file is checked in tests/picaa.js.
 // Command-to-action latency through the real speech-result path, in virtual time.
 // For each command, the speech result arrives at 8 different points in the beat cycle.
 const puppeteer=require('puppeteer-core'), P=require('path');

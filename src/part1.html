@@ -46,6 +46,13 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
 #hud .stat{font-family:var(--stencil);font-size:15px;letter-spacing:.06em}
 #hud .stat small{display:block;font-size:10px;color:var(--khaki);letter-spacing:.12em}
 #fieldWrap{flex:1;position:relative;min-height:0}
+#picaa{position:absolute;z-index:6;top:8px;left:50%;transform:translateX(-50%);display:flex;gap:4px;padding:3px 6px;border-radius:6px;background:rgba(20,22,8,.72);opacity:0;transition:opacity .2s;pointer-events:none;font-family:var(--stencil);font-size:15px}
+#picaa.show{opacity:1}
+#picaa b{width:20px;text-align:center;color:#5a6236;font-weight:700}
+#picaa b.on{color:#ffd27a}
+#picaa b.wait{color:#ffd27a;animation:pblink .6s infinite alternate}
+#picaa b.skip{color:#3c4224;text-decoration:line-through}
+@keyframes pblink{from{opacity:1}to{opacity:.25}}
 #field{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
 #footInd{position:absolute;left:8px;top:8px;display:flex;gap:4px}
 #footInd span{font-family:var(--stencil);font-size:13px;padding:3px 7px;border-radius:4px;background:rgba(0,0,0,.35);color:var(--khaki);border:1px solid rgba(195,176,145,.4)}
@@ -141,7 +148,7 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
     <div class="stat"><small>Cadence</small><span id="bpm">96</span></div>
   </div>
   <div id="fieldWrap">
-    <canvas id="field"></canvas>
+    <div id="picaa" title="Preparatory command · Intermediate (thinking) step · Command of execution · Additional step · Action step"><b>P</b><b>I</b><b>C</b><b>A</b><b>A</b></div><canvas id="field"></canvas>
     <div id="footInd"><span id="fL">LEFT</span><span id="fR">RIGHT</span></div>
     <div id="stateTag">AT THE HALT</div>
     <div id="overlay"><h2 id="ovTitle">Formation broke</h2><div id="ovText"></div><button class="primary" id="ovBtn">Fall in (restart)</button><div style="font-size:12px;color:var(--khaki)">🎙 Mic is off. Tap to fall in.</div></div>

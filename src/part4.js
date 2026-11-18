@@ -58,7 +58,7 @@ const marching = () => ["forward","mark","half","rstep","lstep","back","pivot","
 
 /** Return why the command can't be executed now, or null. */
 function canExecute(c){
-  if(G.over && c.id!=="fallin") return "Formation broke. Say Fall, IN";
+  if(G.over && c.id!=="fallin") return "Formation broke. Tap FALL IN";
   if(G.busy && c.id!=="fallin") return "Wait: "+G.busy+" in progress";
   const halted = G.move==="halt";
   if(c.when==="halt" && !halted) return "Must be at the halt";
@@ -97,7 +97,7 @@ function execute(c){
     case "change": G.busy="change step"; at(k+1,()=>{ G.hitch=true; }); at(k+2,()=>{ G.hitch=false; G.busy=null; }); break;
     case "colR": case "colL": case "colHR": case "colHL": {
       const d = (c.id==="colR"||c.id==="colHR")? 1 : -1, ang=(c.id.startsWith("colH")?45:90)*D2R;
-      const half=(F.W-1)/2*F.interval, inner=0.25, R=half+inner, Rout=R+half;
+      const half=(F.W-1)/2*F.interval, inner=1.0*F.interval, R=half+inner, Rout=R+half;   // pivot file wheels on a 1-step radius at 1/4 step
       const arc={t:"A",ang,r:R,d,f:R/Rout};   // f: outside file keeps a full step, pivot file half-steps
       if(halted||G.move==="mark"){ realignForStepOff(); G.move="forward"; F.path.append(F.ranks[0].s, [arc]); }
       else { if(G.move==="half") G.move="forward"; F.path.append(F.ranks[0].s+stride, [arc]); } // one more step, then pivot
@@ -248,12 +248,14 @@ function advance(dtBeats){
   if(dist<=0) return;
   // Front rank: speed factor < 1 on arcs, so the pivot file half-steps while the outside file wheels.
   const r0=F.ranks[0]; r0.s += dist*F.path.factorAt(r0.s);
+  // Rear ranks: each rank does exactly what the rank ahead did at the same spot on the path
+  // (full steps to the pivot point, the same wheel there), so the distance comes back to one step
+  // after the turn. Only if a rank would actually bump the one ahead does it shorten to a half step.
   for(let r=1;r<F.ranks.length;r++){
     const rk=F.ranks[r], prev=F.ranks[r-1], f=F.path.factorAt(rk.s), gap=prev.s-rk.s;
     let ds=dist*f;
-    if(f===1 && gap>F.rankDist+0.01) ds=Math.min(ds*1.15, gap-F.rankDist+ds);   // cover down after a turn
-    let target=Math.min(rk.s+ds, prev.s-0.35*F.rankDist);
-    // Keep >= 80% distance to the soldier ahead: shorten to a half step, or mark time, if needed.
+    if(f===1 && gap>F.rankDist+0.01) ds=Math.min(ds*1.25, gap-F.rankDist+ds);   // cover down if a rank fell behind
+    let target=Math.min(rk.s+ds, prev.s-0.3*F.rankDist);
     if(!rankClear(r,target)){ const half=rk.s+ds*.5; target = rankClear(r,half)? half : rk.s; }
     rk.s=Math.max(rk.s,target);
   }
@@ -264,11 +266,13 @@ function slotPos(sq,s){
   return {x:p.x+n[0]*lat, y:p.y+n[1]*lat, h:p.h};
 }
 function rankClear(r,s){
-  const a=F.ranks[r], b=F.ranks[r-1], lim=0.8*Math.min(F.rankDist,1);
+  // Safety only: a soldier must never walk into the one directly ahead in the same file.
+  // (At the pivot point the pivot files briefly close up, as in real drill; that's allowed.)
+  const a=F.ranks[r], b=F.ranks[r-1], lim=0.2*Math.min(F.rankDist,1);
   for(let sq=0;sq<F.W;sq++){
-    if(!a.sol[sq]) continue;
-    const pa=slotPos(sq,s);
-    for(let q=0;q<F.W;q++){ if(!b.sol[q]) continue; const pb=slotPos(q,b.s); if(Math.hypot(pa.x-pb.x,pa.y-pb.y)<lim) return false; }
+    if(!a.sol[sq] || !b.sol[sq]) continue;
+    const pa=slotPos(sq,s), pb=slotPos(sq,b.s);
+    if(Math.hypot(pa.x-pb.x,pa.y-pb.y)<lim) return false;
   }
   return true;
 }
@@ -324,4 +328,5 @@ function broke(why){
   if(G.score>hiScore){ hiScore=G.score; localStorage.setItem("formation.hi",hiScore); }
   $("ovTitle").textContent="Formation broke"; $("ovText").textContent=why+". Score "+G.score+" · High "+hiScore;
   $("overlay").classList.add("on"); chime(false); updateHUD();
+  if(typeof stopListening==="function") stopListening();   // recording stops the moment the formation breaks
 }

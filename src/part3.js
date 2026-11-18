@@ -120,44 +120,218 @@ const CMDS = [
 ];
 const CMD = Object.fromEntries(CMDS.map(c=>[c.id,c]));
 
-/* Execution-word recogniser: token -> class (tolerant of mis-hearings) */
+/* ======================================================================
+   SPEECH PARSER: tolerant of how Chrome (especially on Android) mishears
+   drill commands. Steps:
+   1. normalise (lowercase, strip punctuation, numbers to words)
+   2. rewrite known multi-word mishearings ("call him left" -> "column left")
+   3. map every token to a canonical drill keyword (word lists + 1-letter typos)
+   4. find the command of execution near the end, then match the preparatory
+      words in front of it against each command's patterns (either word order
+      for flanks and columns).
+====================================================================== */
 const EXEC_WORDS = {
-  MARCH:["march","marsh","marge","much","mars","harch","hutch","hut","ho","hoe","hah","huh","arch","mash","match","marched","marching","martch","mosh","hoch","harsh","mach"],
-  HALT:["halt","hold","holt","hall","haul","alt","hault","hult","hoult","halts","holds"],
-  FACE:["face","faith","phase","fase","fays","faced","faces","fate"],
-  REST:["rest","wrest","rust","ress","rests","rested","wrist"],
-  EASE:["ease","ees","easy","eese"],
-  DRESS:["dress","dres","drez","dressed","dresses","jess"],
-  FRONT:["front","frunt","fronts","fron"],
-  RIGHT:["right","rite","write","wright","ride"],
-  ATTN:["attention","tension","tenshun","attenshun"],
+  MARCH:["march","marsh","marge","much","mars","harch","hutch","hut","ho","hoe","hah","huh","arch","mash","match","marched","marching","martch","mosh","hoch","harsh","mach","marches","march's","mush","marsha","mars'","mark","marc","larch","parch","starch","hush","hup","hop","harsh"],
+  HALT:["halt","hold","holt","hall","haul","alt","hault","hult","hoult","halts","holds","hawk","hot","whole","hole","haunt","holt's","halt's"],
+  FACE:["face","faith","phase","fase","fays","faced","faces","fate","fake","vase","case","base","space"],
+  REST:["rest","wrest","rust","ress","rests","rested","wrist","arrest","west","rast"],
+  EASE:["ease","ees","easy","eese","these","e's","is","ez","eaze","cheese"],
+  DRESS:["dress","dres","drez","dressed","dresses","jess","press","chess","trust","dross"],
+  FRONT:["front","frunt","fronts","fron","frant","frog","friend","fruit","blunt","runt"],
+  RIGHT:["right","rite","write","wright","ride","rights","alright"],
+  ATTN:["attention","tension","tenshun","attenshun","attentions","detention","intention"],
 };
 const EXEC_LOOKUP = {};
 for(const [k,arr] of Object.entries(EXEC_WORDS)) for(const w of arr) (EXEC_LOOKUP[w]=EXEC_LOOKUP[w]||[]).push(k);
 
+/* canonical keyword -> heard variants (single tokens) */
+const KEYWORDS = {
+  column:["column","columns","colum","collum","colm","colin","collin","colon","colonel","columbus","calm","calum","culm","kolam","colleen","coleman","column's","kollum","kolumn","volume","collar","colour","color","collins","colin's","cologne","collie","collect"],
+  counter:["counter","encounter","counters","countered","counter's","contra","counting","county","canter","cantor","counted","countr","kounter","quarter"],
+  half:["half","have","haf","hav","halves","haff","huff","hof","hath","halfe","half's","calf","hat"],
+  left:["left","lift","lef","laughed","lefts","loft","leff","lest","lyft","lept","laughs","lefty","lifts","leaf","let","lap"],
+  right:["right","write","rite","ride","wright","ryte","rights","rice","alright","bright","wright's","rye","writes","rides","fright","ripe","white"],
+  flank:["flank","flanks","flake","flakes","frank","franks","plank","planks","thank","thanks","flang","flanked","blank","flack","flak","flunk","flonk","flick","flex","flinch","plunk","clank","flag"],
+  step:["step","steps","stop","stepped","stab","stomp","stuff","stap","stepp","stops","stem"],
+  rear:["rear","rare","rhea","reer","rehr","real","rears","rear's","rier","rearr","reared","rearing","raw","ream","reed","roar"],
+  rearWeak:["wear","year","ear","here","hear","near","re","ree","ria","rio","rae","ray","reel","rey","ria","beer","deer","mere","clear","rhee"],
+  mark:["mark","marc","marked","market","mart","marks","marques","marquee","mork","mock","marx"],
+  time:["time","tim","tom","times","thyme","tine","dime","tie","timer","team","tyme","tyne","tight"],
+  change:["change","chain","changed","chang","chains","changes","exchange","shane","chainge","jane"],
+  double:["double","dubble","doubled","bubble","doubles","dabble","duffel","dub"],
+  quick:["quick","quik","kwik","quit","quake","quicker","kick","wick","quickly"],
+  open:["open","opened","opens","opin","hoping","opun"],
+  close:["close","clothes","closed","clove","cloves","clothe","cloze","clows","claus","klaus","clause"],
+  ranks:["ranks","rank","rings","rank's","rinks","rants","wrinks","ranch","rang","rangs","racks"],
+  extend:["extend","extent","extended","extends","extents","x10","xtend","attend","excellent"],
+  forward:["forward","foreword","forwards","forword","fourward","forwad","forwarded","forewarned","onward"],
+  backward:["backward","backwards","backwords","backword","backwoods"],
+  about:["about","bout","abouts","abound","a-bout","abode","abort","about's"],
+  parade:["parade","prade","parades","para","parader","pirate","parody","brigade","paraded","per-raid","parrot"],
+  stand:["stand","stan","stands","stamp","standing","stan's"],
+  at:["at","and","add","ad","an"],
+  ready:["ready","reddy","readi","redi","readie","reading","read","red","rudy","betty","eddie","freddy","readying"],
+  eyes:["eyes","eye","ice","ayes","i","i's","ais","eyes'","eyed","is","eyez"],
+  fall:["fall","falls","fault","foal","fol","fawn"],
+  in:["in","inn","end","and"],
+};
+const UNIT_WORDS = ["squad","squat","squads","platoon","plato","platoons","flight","flights","fight","company","detail","element","team","section","class","formation","unit","troop","troops","platoon's","squad's","squid","play","toon","patoon","platune","flite","flyte","group"];
+const FILLER = new Set(["uh","um","ah","er","erm","the","a","okay","ok","now","and","go","so","like","hey","yo","please"]);
+const KW_LOOKUP = {};  // token -> [canonical keywords]
+for(const [k,arr] of Object.entries(KEYWORDS)) for(const w of arr) (KW_LOOKUP[w]=KW_LOOKUP[w]||[]).push(k);
+const UNIT_SET = new Set(UNIT_WORDS);
+// Words long enough that a one-letter slip is still unambiguous
+const FUZZY_KW = ["column","counter","forward","backward","change","double","extend","parade","flank","ranks","about","quick","ready","platoon"];
+function lev(a,b){ if(Math.abs(a.length-b.length)>1) return 9; const m=a.length,n=b.length; let prev=Array.from({length:n+1},(_,j)=>j);
+  for(let i=1;i<=m;i++){ const cur=[i]; for(let j=1;j<=n;j++) cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1)); prev=cur; } return prev[n]; }
+
+/* multi-word mishearings, applied to the normalised string */
+const REWRITES = [
+  [/\b(?:call|cole|coal|cold|col|kohl|cal|car|collar|calling|calls|coll|kol) (?:him|em|them|um|om|um's|him's|ham|a?m|on|in|lum|loom|loam|umm|ahem|unm)\b/g,"column"],
+  [/\bcolumn (?:um|em|him)\b/g,"column"],
+  [/\b(?:count|cown?t|town) (?:her|or|er|a|uh|ur|err)\b/g,"counter"],
+  [/\b(?:for|four|fore|4|far|from) (?:word|words|ward|wards|wood|world|what|wort|wed|whirred)\b/g,"forward"],
+  [/\b(?:back|bach|bac) (?:ward|wards|word|words|wood|what)\b/g,"backward"],
+  [/\b(?:a|uh) (?:bout|bow|but)\b/g,"about"],
+  [/\b(?:ten|10|tin|tan|ton|then|den|a ten|atten|at ten) (?:hut|hot|hat|hood|hunt|huh|hutt|but|shut)\b/g,"tenhut"],
+  [/\btenhut\b/g,"tenhut"],
+  [/\b(?:fall|falls|fault|foal) (?:in|inn|and|end|en|on)\b/g,"fallin"],
+  [/\b(?:falling|fallen|fallin|follow in|for lin|fallon)\b/g,"fallin"],
+  [/\b(?:per|pa|pur|purr|pare|pear|para) (?:aid|raid|rade|ade|rate|ray)\b/g,"parade"],
+  [/\b(?:stand|stan|stands) (?:at|and|add|an|it|a) (?:ease|ees|easy|e's|these|is|e|ez|ys|eat)\b/g,"standatease"],
+  [/\b(?:stand|stan|stands) (?:at|and) these\b/g,"standatease"],
+  [/\b(?:at|add|and|it|ad) (?:ease|ees|easy|e's|these|ez|ys)\b/g,"atease"],
+  [/\bextended?\b/g,"extend"], [/\bx (?:10|ten|tend)\b/g,"extend"], [/\bex tend\b/g,"extend"],
+  [/\b(?:re|ree|real|rare|rear) (?:mark|march|marsh|much|match)\b/g,"rear march"],
+  [/\bremark\b|\bremarch\b|\brymarch\b|\brearmarch\b/g,"rear march"],
+];
+function normalizeSpeech(text){
+  let t=(" "+String(text||"").toLowerCase()+" ")
+    .replace(/[‘’`]/g,"'").replace(/[^a-z0-9' ]+/g," ")
+    .replace(/(\d)(?=[a-z])/g,"$1 ").replace(/\b4th\b/g,"fourth")
+    .replace(/'s\b/g,"").replace(/'/g,"")
+    .replace(/\s+/g," ").trim();
+  for(const [re,rep] of REWRITES) t=t.replace(re,rep);
+  return t.replace(/\s+/g," ").trim();
+}
+/** Map one token to its canonical keyword(s) */
+function canonOf(tok){
+  if(UNIT_SET.has(tok)) return ["unit"];
+  if(KW_LOOKUP[tok]) return KW_LOOKUP[tok];
+  if(tok.length>=5){ for(const k of FUZZY_KW) if(lev(tok,k)<=1) return [k==="platoon"?"unit":k]; }
+  if(tok.length>=5 && lev(tok,"column")<=2 && tok[0]==="c") return ["column"];
+  return null;
+}
+function execClassesOf(tok){
+  if(EXEC_LOOKUP[tok]) return EXEC_LOOKUP[tok];
+  if(tok.length>=4 && tok.length<=6 && lev(tok,"march")<=1) return ["MARCH"];
+  if(tok.length>=8 && lev(tok,"attention")<=2) return ["ATTN"];
+  return null;
+}
+/* Preparatory-command patterns on the canonical keyword string (units and filler removed).
+   whole:true means the prep must be exactly that word (short, easily-misheard words). */
+const PREP = {
+  MARCH:[
+    ["counter",  /(?:^| )counter(?: column)?$/],
+    ["halfstep", /(?:^| )half step$/],
+    ["colHR",    /(?:^| )(?:column )?(?:half right|right half)(?: column)?$/],
+    ["colHL",    /(?:^| )(?:column )?(?:half left|left half)(?: column)?$/],
+    ["colR",     /(?:^| )(?:column right|right column)$/],
+    ["colL",     /(?:^| )(?:column left|left column)$/],
+    ["rflank",   /(?:^| )(?:right flank|flank right)$/],
+    ["lflank",   /(?:^| )(?:left flank|flank left)$/],
+    ["rstep",    /(?:^| )right step$/],
+    ["lstep",    /(?:^| )left step$/],
+    ["back",     /(?:^| )backward$/],
+    ["mark",     /(?:^| )mark time$/],
+    ["change",   /(?:^| )change step$/],
+    ["double",   /(?:^| )double time$/],
+    ["quick",    /(?:^| )quick time$/],
+    ["openranks",/(?:^| )open ranks$/],
+    ["closeranks",/(?:^| )close ranks$/],
+    ["extend",   /(?:^| )extend$/],
+    ["close",    /^close$/],
+    ["rear",     /(?:^| )rear$/],
+    ["rear",     /^rearWeak$/],
+    ["forward",  /(?:^| )forward$/],
+  ],
+  FACE:[["rface",/^right$/],["lface",/^left$/],["aface",/(?:^| )about$/]],
+  REST:[["parade",/(?:^| )parade$/]],
+  EASE:[["standease",/(?:^| )stand(?: at)?$/]],
+  DRESS:[["dress",/(?:^| )right$/]],
+  RIGHT:[["eyes",/(?:^| )eyes$/]],
+  FRONT:[["front",/(?:^| )ready$/]],
+};
+/** Turn tokens into canonical keywords. Returns {canon:[...], unit:bool, junkAtEnd:bool}. */
+function canonPrep(tokens){
+  const out=[]; let unit=false;
+  for(let i=0;i<tokens.length;i++){
+    const w=tokens[i];
+    // "march time" / "marsh time" before an execution word is Mark time
+    if(i+1<tokens.length && execClassesOf(w)?.includes("MARCH") && canonOf(tokens[i+1])?.includes("time")){ out.push("mark"); continue; }
+    const c=canonOf(w);
+    if(c){
+      if(c[0]==="unit"){ unit=true; continue; }
+      out.push(c.length>1 ? c : c[0]); continue;
+    }
+    if(FILLER.has(w)) continue;
+    out.push("_");   // unknown word
+  }
+  return {canon:out, unit};
+}
+/** All ways to read ambiguous tokens (e.g. "and" = at / in), capped */
+function expand(canon){
+  let res=[[]];
+  for(const c of canon){ const opts=Array.isArray(c)?c:[c]; const nx=[]; for(const r of res) for(const o of opts) nx.push(r.concat(o)); res=nx.slice(0,32); }
+  return res.map(r=>r.join(" "));
+}
+function matchPrep(cls, tokens){
+  const pats=PREP[cls]; if(!pats) return null;
+  const {canon}=canonPrep(tokens);
+  for(const s of expand(canon)){
+    for(const [id,re] of pats) if(re.test(s)) return CMD[id];
+  }
+  return null;
+}
+
 /** Parse a transcript into {cmd, prep} or null, using the LAST execution word heard. */
 function parseCommand(text){
-  const t = text.toLowerCase().replace(/[^a-z0-9' ]+/g," ").replace(/\b10\b/g,"ten").replace(/\s+/g," ").trim();
-  const tok = t.split(" ").filter(Boolean);
+  const t=normalizeSpeech(text);
+  const tok=t.split(" ").filter(Boolean);
   if(!tok.length) return null;
-  const tail = tok.slice(-3).join(" ");
+  const last=tok[tok.length-1], tail=tok.slice(-4);
   // one-part and special forms
-  if(/(?:^|\s)at ease$/.test(tail) && !/stand (?:at|and) ease$/.test(tail)) return {cmd:CMD.atease, prep:""};
-  if(/(?:^|\s)(?:ten hut|tenhut|ten hot|atten hut|attenhut)$/.test(tail)) return {cmd:CMD.attn, prep:tok.slice(-6,-2).join(" ")};
-  if(/(?:^|\s)(?:fall in|fallin|falling|fallen|fall inn)$/.test(tail)) return {cmd:CMD.fallin, prep:"fall"};
-  for(let i=tok.length-1;i>=Math.max(0,tok.length-2);i--){   // allow one trailing noise word
-    const classes = EXEC_LOOKUP[tok[i]]; if(!classes) continue;
-    const prep = tok.slice(Math.max(0,i-5), i).join(" ");
+  if(last==="atease" && !tail.includes("standatease")) return {cmd:CMD.atease, prep:""};
+  if(last==="standatease") return {cmd:CMD.standease, prep:"stand at"};
+  if(last==="tenhut") return {cmd:CMD.attn, prep:tok.slice(-5,-1).join(" ")};
+  if(last==="fallin" || (tok.length>=2 && last==="in" && canonOf(tok[tok.length-2])?.includes("fall"))) return {cmd:CMD.fallin, prep:"fall"};
+  // command of execution: the last recognised one, allowing up to two trailing noise words
+  for(let i=tok.length-1;i>=Math.max(0,tok.length-3);i--){
+    const classes=execClassesOf(tok[i]);
+    if(!classes){ if(canonOf(tok[i])) break; continue; }      // a drill word after it: this isn't the end
+    const prepTok=tok.slice(Math.max(0,i-6), i), prep=prepTok.join(" ");
     for(const cls of classes){
-      for(const c of CMDS){
-        if(c.exec!==cls || c.single) continue;
-        if(c.id==="halt"||c.id==="attn"){ // unit word optional on Easy
-          if(new RegExp(UNIT).test(prep) || ((settings.sens==="recruit"||settings.sens==="none") && prep.length===0)) return {cmd:c, prep};
-          continue;
-        }
-        if(c.re && new RegExp(c.re).test(prep)) return {cmd:c, prep};
+      if(cls==="HALT"||cls==="ATTN"){
+        const {canon,unit}=canonPrep(prepTok);
+        const bare = canon.filter(c=>c!=="_").length===0;
+        const strict = cls==="HALT" ? ["halt","holt","hault","halts"].includes(tok[i]) : ["attention","tenshun","attenshun"].includes(tok[i]);
+        if(unit || ((settings.sens==="recruit"||settings.sens==="none") && bare && prepTok.length===0 && strict)) return {cmd:CMD[cls==="HALT"?"halt":"attn"], prep};
+        continue;
       }
+      const c=matchPrep(cls, prepTok);
+      if(c) return {cmd:c, prep};
     }
+    // "Column left mark": "mark" heard as the execution word but it's the start of "mark time"? no: fall through
+  }
+  return null;
+}
+/** A preparatory command with no execution word yet (e.g. Android ended the session at the pause). */
+function parsePrepOnly(text){
+  const tok=normalizeSpeech(text).split(" ").filter(Boolean);
+  if(!tok.length) return null;
+  for(const cls of ["MARCH","FACE","REST","DRESS","FRONT","RIGHT"]){
+    const c=matchPrep(cls, tok.slice(-6));
+    if(c && !(cls==="DRESS"||cls==="FACE") ) return c;   // "right"/"left" alone is too ambiguous to wait on
   }
   return null;
 }

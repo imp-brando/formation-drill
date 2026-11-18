@@ -133,14 +133,25 @@ let sessionText="", lastRecStart=0, lastResultT=0, ptt=false, restartTimer=null,
 let micMode = ["auto","rec","both"].includes(localStorage.getItem("formation.micMode")) ? localStorage.getItem("formation.micMode") : "auto";
 let coexist = localStorage.getItem("formation.coexist");   // "yes" | "no" | null (untested)
 let meterOffReason = "", pendingProbe=false, probe=null;
-const consumed=new Set();
 const normText = t => t.toLowerCase().replace(/[^a-z0-9' ]+/g," ").replace(/\s+/g," ").trim();
 function setStatus(txt, cls){ const el=$("srStatus"); if(el){ el.textContent=txt; el.className=cls||""; } }
 
+/* Grammar hint: Chrome mostly ignores it, but it's harmless and helps engines that use it. */
+const GRAMMAR_PHRASES=["column right march","column left march","column half right march","column half left march","counter column march","rear march","right flank march","left flank march","forward march","mark time march","half step march","change step march","double time march","quick time march","right step march","left step march","backward march","open ranks march","close ranks march","extend march","close march","platoon halt","platoon attention","right face","left face","about face","parade rest","stand at ease","at ease","dress right dress","eyes right","ready front","fall in"];
+function addGrammar(r){
+  try{
+    const GL=window.SpeechGrammarList||window.webkitSpeechGrammarList; if(!GL) return;
+    const g=new GL(); g.addFromString("#JSGF V1.0; grammar drill; public <cmd> = "+GRAMMAR_PHRASES.join(" | ")+" ;", 1);
+    r.grammars=g;
+  }catch(_){}
+}
 function makeRec(){
   const r=new SR();
-  r.lang="en-US"; r.interimResults=true; r.maxAlternatives=3;
-  r.continuous = !IS_ANDROID && !ptt;      // Android: short sessions restarted immediately are the most reliable
+  r.lang="en-US"; r.interimResults=true; r.maxAlternatives=5;
+  // Android: short sessions restarted immediately are the most reliable. Hold-to-talk stays open
+  // until release, so a pause before the execution word can't end it.
+  r.continuous = ptt || !IS_ANDROID;
+  addGrammar(r);
   r.onstart=()=>{ session++; sessionText=""; recRunning=true; lastRecStart=now(); lastRecError="";
     setStatus(ptt? "🎙 Listening (hold)…" : "🎙 Listening"+(micOK?" · voice meter on":" · speech only"), "ok"); };
   r.onresult=handleResult;
@@ -167,34 +178,79 @@ function restartRec(){
 }
 function scheduleRestart(ms){ clearTimeout(restartTimer); restartTimer=setTimeout(()=>{ if(recOn && !recRunning && !ptt) restartRec(); }, ms); }
 
+let pendingPrep=null;                 // {text, t}: a prep heard without its execution word yet
+const consumedText=new Map();          // result key -> transcript already turned into a command
+const PREP_WAIT_MS=3500;
+function freshPart(key, n){
+  const prev=consumedText.get(key);
+  if(prev!==undefined){
+    if(n.startsWith(prev)) return n.slice(prev.length).trim();
+    const pw=prev.split(" "), nw=n.split(" ");
+    if(pw[0]!==nw[0]) return n;          // a different utterance reusing the slot: parse all of it
+    // the recogniser revised words it already gave us: only take words beyond what we used
+    return nw.length>pw.length+1 ? nw.slice(pw.length).join(" ") : "";
+  }
+  // Android Chrome repeats earlier words of the session in later results
+  return sessionText && n.startsWith(sessionText) ? n.slice(sessionText.length).trim() : n;
+}
+function hasExecWord(t){ return normalizeSpeech(t).split(" ").slice(-3).some(w=>execClassesOf(w)); }
 function handleResult(e){
+  if(!recOn) return;                    // game over / menu: ignore anything still in flight
   lastResultT=now();
   if(probe) probe.results++;
   let triggerProbe=false;
   for(let i=e.resultIndex;i<e.results.length;i++){
     const res=e.results[i], key=session+":"+i, top=res[0].transcript.trim();
     $("heardTxt").textContent=top;
-    if(consumed.has(key)) continue;
     if(ttsBusy || now()<ttsQuietSince){ $("heardTxt").textContent="(ignored: cadence voice) "+top; continue; } // never obey our own TTS
-    let hit=null;
-    for(let a=0;a<res.length && !hit;a++){
-      const n=normText(res[a].transcript);
-      // Android Chrome repeats earlier words in later results; only parse what's new this session
-      const fresh = sessionText && n.startsWith(sessionText) ? n.slice(sessionText.length) : n;
-      const p=parseCommand(fresh); if(p) hit={p, raw:res[a].transcript, n};
+    let hit=null, firstFresh=null;
+    const pend = pendingPrep && now()-pendingPrep.t<PREP_WAIT_MS ? pendingPrep.text : null;
+    // try every alternative Chrome offers, first alone, then joined to a prep heard just before
+    for(let pass=0; pass<2 && !hit; pass++){
+      if(pass===1 && !pend) break;
+      for(let a=0;a<res.length && !hit;a++){
+        const n=normText(res[a].transcript), fresh=freshPart(key,n);
+        if(firstFresh===null) firstFresh=fresh;
+        if(!fresh) continue;
+        const p=parseCommand(pass===0? fresh : pend+" "+fresh);
+        if(p) hit={p, raw:(pass===0?"":pend+" … ")+res[a].transcript.trim(), n};
+      }
     }
     if(hit){
-      consumed.add(key); sessionText=hit.n;
-      setStatus(`Heard "${hit.raw.trim()}" → ${hit.p.cmd.name}`, "ok");
+      consumedText.set(key, hit.n); sessionText=hit.n; pendingPrep=null;
+      setStatus(`Heard "${hit.raw}" → ${hit.p.cmd.name}`, "ok");
       onCommandHeard(hit.p, hit.raw); triggerProbe=true;
-    } else if(res.isFinal){
+    } else if(res.isFinal && firstFresh){
       triggerProbe=true;
-      setStatus(`Heard "${top}": not a drill command`, "warn");
-      if(/\b(march|halt|face|rest|ease|dress|front)\b/i.test(top)) flash("NOT A VALID COMMAND","bad","Heard: "+top);
+      const prep=parsePrepOnly(firstFresh);
+      if(prep){
+        pendingPrep={text:firstFresh, t:now()};
+        setStatus(`Heard "${top}" → ${prep.name.split(",")[0]}… waiting for ${prep.exec}`, "ok");
+      } else {
+        setStatus(`Heard "${top}": not a drill command`, "warn");
+        if(hasExecWord(firstFresh)) flash("NOT A VALID COMMAND","bad","Heard: "+top);
+      }
+      consumedText.set(key, normText(res[0].transcript));
     }
   }
   // Speech is proven to work: now try adding the voice meter (after this utterance is handled)
   if(pendingProbe && triggerProbe) setTimeout(startProbeAfterSpeech, 300);
+}
+
+/* ---------- Game over: stop listening completely (mic indicator off) until the user taps ---------- */
+function stopListening(why){
+  recOn=false; ptt=false; pendingPrep=null; pendingProbe=false; probe=null;
+  clearTimeout(restartTimer); clearInterval(watchdogTimer);
+  try{ if(rec){ rec.onend=null; rec.onresult=null; rec.abort(); } }catch(_){}
+  rec=null; recRunning=false;
+  const hadMeter=micOK; stopMic();
+  if(hadMeter && IS_ANDROID && coexist!=="yes") pendingProbe=false;
+  meterOffReason="Mic off";
+  setStatus(why||"🎙 Mic off. Tap FALL IN to resume.", "warn");
+}
+async function resumeListening(){
+  if(micMode!=="rec" && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) await setupMeter();
+  startRecognition();
 }
 
 /* ---------- Voice meter (getUserMedia) setup and the Android coexistence probe ---------- */
@@ -240,7 +296,7 @@ function disableMeter(reason){
 /* ---------- Hold-to-talk backup: forces a fresh recognition session while held ---------- */
 function pttDown(e){
   if(e) e.preventDefault();
-  if(!SR) return;
+  if(!SR || !G || G.over) return;      // mic stays off after Formation broke until FALL IN is tapped
   ptt=true; recOn=true; clearTimeout(restartTimer);
   try{ if(rec){ rec.onend=null; rec.abort(); } }catch(_){}
   rec=makeRec(); rec.onend=()=>{ recRunning=false; if(!ptt) scheduleRestart(40); };
@@ -250,7 +306,7 @@ function pttDown(e){
 function pttUp(){
   if(!ptt) return;
   ptt=false; $("pttBtn").classList.remove("held");
-  try{ rec.stop(); }catch(_){}           // stop() delivers the final result, then onend resumes auto-listening
+  try{ if(rec) rec.stop(); }catch(_){}           // stop() delivers the final result, then onend resumes auto-listening
   scheduleRestart(1200);
 }
 
@@ -413,8 +469,8 @@ async function begin(mode){
 /* ---------- Wire up the UI ---------- */
 document.querySelectorAll("[data-mode]").forEach(b=>b.addEventListener("click",()=>begin(b.dataset.mode)));
 $("btnRef").onclick=()=>show("ref"); $("refBack").onclick=()=>show("start");
-$("btnQuit").onclick=()=>{ running=false; cadStop(); show("start"); $("hiStart").textContent=hiScore; };
-$("ovBtn").onclick=()=>fallIn();
+$("btnQuit").onclick=()=>{ running=false; cadStop(); stopListening("🎙 Mic off"); show("start"); $("hiStart").textContent=hiScore; };
+$("ovBtn").onclick=async()=>{ fallIn(); await resumeListening(); };   // a tap (user gesture) turns the mic back on
 $("cadToggle").onclick=()=>$("cadBar").classList.toggle("collapsed");
 $("cadPlay").onclick=()=>cad.on?cadStop():cadStart();
 $("cadSel").onchange=()=>{ if(cad.on) cadStart(); else { cad.item=FormationCadences.all().find(c=>c.id===$("cadSel").value); cad.line=0; renderCad(); } };

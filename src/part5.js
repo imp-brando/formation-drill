@@ -15,7 +15,7 @@ function computeView(){
   if(G.mode==="snake"){ const sc=Math.min(W/SNAKE_W, H/SNAKE_H); view={scale:sc, ox:(W-SNAKE_W*sc)/2, oy:(H-SNAKE_H*sc)/2}; return; }
   const sol=allSoldiers(); let cx=0,cy=0; sol.forEach(s=>{cx+=s.x;cy+=s.y;}); cx/=sol.length||1; cy/=sol.length||1;
   cam.x=lerp(cam.x,cx,.08); cam.y=lerp(cam.y,cy,.08);
-  const sc=Math.min(W,H)/(G.mode==="practice"? 7 : 16);   // zoomed out: about 16 steps across a phone
+  const sc=Math.min(W,H)/(G.mode==="practice"? 7 : 21);   // zoomed out: about 21 steps across a phone
   view={scale:sc, ox:W/2-cam.x*sc, oy:H/2-cam.y*sc};
 }
 function draw(phase){
@@ -40,12 +40,17 @@ function draw(phase){
   }
   for(let r=F.ranks.length-1;r>=0;r--) F.ranks[r].sol.forEach((s,sq)=>{ if(s) drawSoldier(s, phase, sq); });
   if(G.sgt && G.mode!=="practice") drawSergeant(G.sgt);
+  if(window.__trace && window.__trace.length>1){                // test-only: drill sergeant path overlay
+    ctx.strokeStyle="rgba(200,30,30,.85)"; ctx.lineWidth=0.09; ctx.beginPath();
+    window.__trace.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.stroke();
+    ctx.fillStyle="rgba(200,30,30,.9)"; for(let i=0;i<window.__trace.length;i+=8){ const p=window.__trace[i]; ctx.beginPath(); ctx.arc(p[0],p[1],0.06,0,Math.PI*2); ctx.fill(); }
+  }
 }
 /** The drill sergeant: larger, darker blouse, campaign hat (wide brim, Montana peak). Legs swing whenever he walks. */
 function drawSergeant(S){
   const full=G.tempo==="double"?1.2:1.0, amp=clamp(S.spd/full,0,1.25);
   const ph=S.phase||0, walking=amp>0.08, mark=!walking && marching() && G.move==="mark";
-  const k=(G.mode==="snake"?1.3:1.15)*1.25;
+  const k=(G.mode==="snake"?1.4:1.25)*1.25;
   ctx.save(); ctx.translate(S.x,S.y); ctx.scale(k,k);
   drawBody(0,0,S.face, walking?amp:0, (walking||mark)?ph:0, "#2c3514","#0b0d03", {posture:"attention", lift: mark?1:0});
   const d=dirV(S.face);
@@ -70,7 +75,7 @@ function drawSoldier(s, phase, sq){
   const halted = G.move==="halt" && F.mode!=="counter";
   const inPlace = !halted && marching() && amp<0.2;            // mark time, pivot, closing, waiting rank
   const rightFile = sq===F.W-1;
-  const k = G.mode==="snake" ? 1.3 : 1.15;                   // sprites scaled up within the step so legs stay readable
+  const k = G.mode==="snake" ? 1.4 : 1.25;                   // sprites scaled up within the step so legs stay readable on the bigger field
   ctx.save(); ctx.translate(s.x,s.y); ctx.scale(k,k);
   drawBody(0,0,s.face, halted?0:amp, phase, "#3e4a1c","#151905", {
     posture:halted?G.posture:"attention", dress:G.dress && !rightFile, eyes:(G.eyes||G.dress) && !(marching() && rightFile && G.eyes) && !(G.dress && rightFile),
@@ -89,7 +94,7 @@ function drawBody(x,y,h,amp,phase,fill,stroke,opt){
   for(const [lat,fwd,lf] of legs){
     const hx=x+n[0]*lat*.5, hy=y+n[1]*lat*.5;
     const fx=x+n[0]*lat+d[0]*(fwd+lf*.14), fy=y+n[1]*lat+d[1]*(fwd+lf*.14);
-    ctx.strokeStyle="#1f1608"; ctx.lineWidth=0.14;
+    ctx.strokeStyle="#1f1608"; ctx.lineWidth=0.16;
     ctx.beginPath(); ctx.moveTo(hx,hy); ctx.lineTo(fx,fy); ctx.stroke();
     ctx.fillStyle= lf>0.3? "#8a6a3a" : "#120c05";       // a raised boot shows lighter (knee up)
     ctx.beginPath(); ctx.ellipse(fx+d[0]*.03,fy+d[1]*.03,0.085+lf*.03,0.125+lf*.03,h,0,Math.PI*2); ctx.fill();
@@ -722,10 +727,10 @@ window.FG = {
   setRecOn(v){ recOn=v; },
   now(){ return now(); },
   addRecruit(){ addRecruitToFormation(); },
-  sgt(){ const S=G.sgt; if(!S) return null; const fr=sgtFrame(); const u=(S.x-fr.cx)*fr.d[0]+(S.y-fr.cy)*fr.d[1], v=(S.x-fr.cx)*fr.n[0]+(S.y-fr.cy)*fr.n[1];
+  sgt(){ const S=G.sgt; if(!S) return null; const fr=sgtFrame(S.ccH); const u=(S.x-fr.cx)*fr.d[0]+(S.y-fr.cy)*fr.d[1], v=(S.x-fr.cx)*fr.n[0]+(S.y-fr.cy)*fr.n[1];
     const [tx,ty]=sgtTarget(fr); let md=1e9; for(const s of fr.sol) md=Math.min(md,Math.hypot(s.x-S.x,s.y-S.y));
     return {x:+S.x.toFixed(2), y:+S.y.toFixed(2), h:Math.round((fr.h/D2R%360+360)%360), out:+(fr.vmin-v).toFixed(2), depthOff:+(u-(fr.umin+fr.umax)/2).toFixed(2),
-            toTarget:+Math.hypot(tx-S.x,ty-S.y).toFixed(2), minDist:+md.toFixed(2), route:S.route}; },
+            toTarget:+Math.hypot(tx-S.x,ty-S.y).toFixed(2), minDist:+md.toFixed(2), route:S.route, u, v, cx:fr.cx, cy:fr.cy, hr:fr.h}; },
   frame(db,hz){ pushFrame(now(), db, hz||0); },                  // feed the voice meter (tests)
   meter(on){ micOK=on; if(on) noiseFloor=-60; },
   burst:()=>({armed: armed && {id:armed.cmd.id, src:armed.src}, last: lastBurst && {id:lastBurst.id, onsetT:lastBurst.onsetT}, execMode}),

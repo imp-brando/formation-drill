@@ -12,13 +12,13 @@ function footAtTime(t){ const k=clock.k-1+Math.round((t-clock.lastT)/clock.perio
    GAME STATE
 ====================================================================== */
 let SNAKE_W=28, SNAKE_H=42;     // parade field in steps (1 unit = one 30-inch step); sized to the screen in newGame
-const MIN_CELL_PX=12.5;         // smallest on-screen step (CSS px) at which legs still read clearly
-/** Fit as many steps as the field area allows (about 28 x 42 on a phone), keeping soldiers recognisable. */
+const MIN_CELL_PX=9.6;          // smallest on-screen step (CSS px) at which legs still read clearly
+/** Fit as many steps as the field area allows (about 36 x 55 on a phone), keeping soldiers recognisable. */
 function pickSnakeField(){
   const r=cv.getBoundingClientRect(); let w=r.width, h=r.height;
   if(w<50||h<50){ w=390; h=590; }
-  const cell=Math.max(MIN_CELL_PX, Math.min(w, h*2/3)/28);
-  SNAKE_W=clamp(Math.floor(w/cell),20,44); SNAKE_H=clamp(Math.floor(h/cell),30,66);
+  const cell=Math.max(MIN_CELL_PX, Math.min(w, h*2/3)/36);
+  SNAKE_W=clamp(Math.floor(w/cell),26,57); SNAKE_H=clamp(Math.floor(h/cell),39,86);
 }
 let G=null;      // current game
 let F=null;      // formation: {W, rankDist, interval, path, ranks:[{s, sol:[soldier|null per file]}], mode, cc}
@@ -45,7 +45,7 @@ function newGame(mode){
   else F=makeFormation(0,0,0,4, mode==="drill"?16:4);
   layoutSoldiers(0,true);
   sgtInit();
-  if(mode==="snake"){ spawnRecruit(); spawnRecruit(); }   // two recruits out at once on the big field
+  if(mode==="snake"){ spawnRecruit(); spawnRecruit(); spawnRecruit(); }   // three recruits out at once on the big field
   cam.x=0; cam.y=0;
   $("overlay").classList.remove("on");
   updateHUD(); setStateTag();
@@ -408,7 +408,7 @@ function spawnRecruit(){
   const sol=allSoldiers();
   for(let tries=0;tries<300;tries++){
     const x=1+Math.floor(Math.random()*(SNAKE_W-2))+.5, y=1+Math.floor(Math.random()*(SNAKE_H-2))+.5;
-    if(sol.every(s=>Math.hypot(s.x-x,s.y-y)>2)){ G.recruits.push({x,y,face:Math.floor(Math.random()*8)*45*D2R,t:now()}); return; }
+    if(sol.every(s=>Math.hypot(s.x-x,s.y-y)>2) && !(G.sgt && Math.hypot(G.sgt.x-x,G.sgt.y-y)<1.5)){ G.recruits.push({x,y,face:Math.floor(Math.random()*8)*45*D2R,t:now()}); return; }
   }
 }
 function addRecruitToFormation(){
@@ -471,10 +471,11 @@ function broke(why){
    DRILL SERGEANT: centred on the formation's LEFT side (relative to the way it faces), 2 steps out
    from the left flank file, at the middle of its depth. Not part of the formation: no walls, no
    self-collision, can't pick up recruits. He walks in cadence (up to 1.3 steps per beat on post, double-timing up to 2 when relocating) and
-   goes AROUND the end of the formation when the left side changes (rear march, flanks, facings).
+   goes AROUND the nearer end of the formation, hugging it 1 step out, when the left side changes;
+   during a counter column he starts for the new left side at once (rear march, flanks, facings).
 ====================================================================== */
 const SGT_OUT=2, SGT_CLEAR=0.8;
-function sgtFrame(){
+function sgtFrame(hOverride){
   const sol=allSoldiers(); if(!sol.length) return null;
   let cx=0, cy=0, fx=0, fy=0;
   for(const s of sol){ cx+=s.x; cy+=s.y; fx+=Math.sin(s.face); fy+=-Math.cos(s.face); }
@@ -482,6 +483,7 @@ function sgtFrame(){
   const R=Math.hypot(fx,fy)/sol.length;
   let h = (G.sgt && (R<0.6 || F.mode==="counter")) ? G.sgt.h : Math.atan2(fx,-fy);   // mixed facings (counter column): keep the last facing
   if(!G.sgt && R<0.6) h=0;
+  if(hOverride!==undefined) h=hOverride;
   const d=dirV(h), n=nrmV(h);
   let umin=1e9, umax=-1e9, vmin=1e9, vmax=-1e9;
   for(const s of sol){ const u=(s.x-cx)*d[0]+(s.y-cy)*d[1], v=(s.x-cx)*n[0]+(s.y-cy)*n[1];
@@ -493,40 +495,77 @@ function sgtTarget(fr){ return sgtXY(fr,(fr.umin+fr.umax)/2, fr.vmin-SGT_OUT); }
 function sgtInit(){
   G.sgt=null; const fr=sgtFrame(); if(!fr) return;
   const [x,y]=sgtTarget(fr);
-  G.sgt={x,y,face:fr.h,h:fr.h,spd:0,px:x,py:y,route:"post"};
+  G.sgt={x,y,face:fr.h,h:fr.h,spd:0,px:x,py:y,route:"post",vf:[0,0],lc:[fr.cx,fr.cy]};
+}
+const SGT_HUG=1.0;     // clearance kept from the formation's edge while going around an end
+/** Does segment a->b cross the formation box (expanded by c)? Coordinates are (u,v) in the formation frame. */
+function sgtBlocked(fr,a,b,c){
+  const x0=fr.umin-c, x1=fr.umax+c, y0=fr.vmin-c, y1=fr.vmax+c;
+  let t0=0, t1=1; const dx=b[0]-a[0], dy=b[1]-a[1];
+  for(const [pp,q] of [[-dx,a[0]-x0],[dx,x1-a[0]],[-dy,a[1]-y0],[dy,y1-a[1]]]){
+    if(Math.abs(pp)<1e-9){ if(q<0) return false; continue; }
+    const r=q/pp; if(pp<0){ if(r>t1) return false; if(r>t0) t0=r; } else { if(r<t0) return false; if(r<t1) t1=r; }
+  }
+  return t1-t0>1e-6;
+}
+/** Next point to walk to: straight to post if the way is clear, else hug the nearer end of the formation
+    (corner points SGT_HUG outside its edge), whichever end makes the shorter walk. */
+function sgtWaypoint(fr,S,T){
+  const c=SGT_HUG, cb=c-0.06;
+  if(!sgtBlocked(fr,S,T,cb)){ if(G.sgt) G.sgt.end=null; return {w:T, route:"post"}; }
+  const vNear = S[1]>(fr.vmin+fr.vmax)/2 ? fr.vmax+c : fr.vmin-c;     // corner on his current side
+  const vFar  = T[1]>(fr.vmin+fr.vmax)/2 ? fr.vmax+c : fr.vmin-c;     // corner on the post's side
+  const D=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
+  const opts=[fr.umax+c, fr.umin-c].map((uE,i)=>{
+    const c1=[uE,vNear], c2=[uE,vFar];
+    return !sgtBlocked(fr,S,c2,cb) ? {end:i, w:c2, len:D(S,c2)+D(c2,T)} : {end:i, w:c1, len:D(S,c1)+D(c1,c2)+D(c2,T)};
+  });
+  // stick with the end already chosen unless the other is clearly (2+ steps) shorter: no dithering
+  const prev=G.sgt && G.sgt.end;
+  let best = opts[0].len<opts[1].len ? opts[0] : opts[1];
+  if(prev!==undefined && prev!==null && best.end!==prev && opts[prev].len < best.len+2) best=opts[prev];
+  // counter column: commit to the old rear (= the new front, opts[0] in the new facing) for the whole maneuver
+  if(F.mode==="counter") best = (prev!==undefined && prev!==null) ? opts[prev] : opts[0];
+  G.sgt.end=best.end;
+  return {w:best.w, route:"around"};
 }
 function sgtUpdate(dt){
   if(!G.sgt) return sgtInit();
-  const S=G.sgt, fr=sgtFrame(); if(!fr) return;
+  const S=G.sgt;
+  // counter column: head for the NEW left side (the formation will face the other way) during the maneuver
+  if(F.mode==="counter"){ if(S.ccH===undefined) S.ccH=S.h+Math.PI; } else S.ccH=undefined;
+  const fr=sgtFrame(S.ccH); if(!fr) return;
   S.h=fr.h;
   const per=clock.period, full=G.tempo==="double"?1.2:1.0;
   const us=(S.x-fr.cx)*fr.d[0]+(S.y-fr.cy)*fr.d[1], vs=(S.x-fr.cx)*fr.n[0]+(S.y-fr.cy)*fr.n[1];
-  const vt=fr.vmin-SGT_OUT, ut=(fr.umin+fr.umax)/2;
-  let wu=ut, wv=vt, route="post";
-  if(vs > fr.vmin-1.2){                                          // not on the left side: go around an end of the formation
-    const inU = us>fr.umin-1.4 && us<fr.umax+1.4;
-    if(inU){
-      const marchingFwd = marching() && F.mode!=="counter";
-      const rearEnd=fr.umin-1.7, frontEnd=fr.umax+1.7;
-      const end = marchingFwd ? (us>fr.umax ? frontEnd : rearEnd) : (Math.abs(us-rearEnd)<Math.abs(us-frontEnd)? rearEnd : frontEnd);
-      wu=end; wv=vs; route="around";
-    } else { wu=us; wv=vt; route="around"; }
-  }
-  const [tx,ty]=sgtXY(fr,wu,wv);
+  const T=[(fr.umin+fr.umax)/2, fr.vmin-SGT_OUT];
+  const {w,route}=sgtWaypoint(fr,[us,vs],T);
+  let [tx,ty]=sgtXY(fr,w[0],w[1]);
+  // while going around, ease the aim point (it jumps when the formation's outline changes shape mid-maneuver)
+  if(route==="around" && S.aim && S.route==="around"){ const a=Math.min(1,dt/300); tx=lerp(S.aim[0],tx,a); ty=lerp(S.aim[1],ty,a); }
+  S.aim=[tx,ty];
   let dx=tx-S.x, dy=ty-S.y; const dist=Math.hypot(dx,dy);
-  // match the formation's pace when on post; walk briskly when relocating
   const far = route==="around" || dist>1.5;
-  const cap=(far?2.0:1.3)*full*dt/per;                           // on post: up to 1.3 steps/beat; relocating: he double-times
-  const mv=Math.min(dist, cap);
-  if(dist>1e-6){ S.x+=dx/dist*mv; S.y+=dy/dist*mv; }
+  // formation velocity (steps per ms), smoothed; he moves WITH it plus a straight approach to the waypoint,
+  // so his path hugs the formation instead of bowing out while it marches away from him
+  if(S.lc && dt>0){ let vx=(fr.cx-S.lc[0])/dt, vy=(fr.cy-S.lc[1])/dt; const vm=Math.hypot(vx,vy), vmax=1.5*full/per;
+    if(vm>vmax){ vx=vx/vm*vmax; vy=vy/vm*vmax; } S.vf=[lerp(S.vf[0],vx,.3), lerp(S.vf[1],vy,.3)]; }
+  if(!S.vf) S.vf=[0,0];
+  S.lc=[fr.cx,fr.cy];
+  const capV=(far?2.0:1.3)*full/per;                             // on post: up to 1.3 steps/beat; relocating: he double-times
+  if(dist>1e-6){
+    const ux=dx/dist, uy=dy/dist, vf=S.vf, fu=vf[0]*ux+vf[1]*uy, f2=vf[0]*vf[0]+vf[1]*vf[1];
+    let k=-fu+Math.sqrt(Math.max(0, fu*fu-f2+capV*capV));       // approach speed that keeps |velocity| <= cap
+    k=Math.max(0, Math.min(k, dist/dt));                          // no overshoot
+    S.x+=(vf[0]+ux*k)*dt; S.y+=(vf[1]+uy*k)*dt;
+  } else { S.x+=S.vf[0]*dt; S.y+=S.vf[1]*dt; }
   // never stand on a soldier
   for(let it=0;it<3;it++) for(const s of fr.sol){ const ex=S.x-s.x, ey=S.y-s.y, e=Math.hypot(ex,ey);
-    if(e<SGT_CLEAR){ const k=(SGT_CLEAR-e)/(e||1); S.x+=(e?ex:fr.n[0])*k; S.y+=(e?ey:fr.n[1])*k; } }
+    if(e<SGT_CLEAR){ const k=(SGT_CLEAR-e)/(e||1); S.x+=(e?ex:-fr.n[0])*k; S.y+=(e?ey:-fr.n[1])*k; } }
   if(G.mode==="snake"){ S.x=clamp(S.x,0.3,SNAKE_W-0.3); S.y=clamp(S.y,0.3,SNAKE_H-0.3); }  // stays visible; walls only count for soldiers
   const dtBeats=dt/per;
   if(dtBeats>0){ const v=Math.hypot(S.x-S.px,S.y-S.py)/dtBeats; S.spd=lerp(S.spd,Math.min(v,2),.25); }
   S.px=S.x; S.py=S.y; S.route=route;
-  // face where he walks when relocating, else the formation's facing
   const want = (route==="around" && dist>0.3) ? Math.atan2(dx,-dy) : fr.h;
   let da=((want-S.face)%(2*Math.PI)+3*Math.PI)%(2*Math.PI)-Math.PI; S.face+=da*Math.min(1,dt/120);
 }

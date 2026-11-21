@@ -632,6 +632,10 @@ function flash(msg,cls,detail){ const el=$("verdict"); el.className=cls; el.text
    talks, interrupt on a command and pick up the same half-line on a later left foot once the
    command has executed (or once marching restarts after a halt).
 ====================================================================== */
+/** Voiced cadences are OFF until better (real) recordings replace the TTS sprites: no UI, no audio fetched or cached.
+    Flip to true (and drop new sprites into audio/cadence/) to bring the feature back; the engine, echo guard and
+    ducking below stay intact but dormant (cad.on is never true while disabled). */
+let CADENCES_ENABLED=false;
 const CAD_VARIANTS={q116:116, q136:136, d180:180};
 const CAD_DUCK=0.15, CAD_ECHO_MS=2500, CAD_BLEED_MARGIN=8, CAD_UNDUCK_MS=1800;
 const cad={ on:false, item:null, line:0, half:0, play:null, hist:[], bufs:{}, loading:{}, gain:null, an:null, anBuf:null,
@@ -655,7 +659,7 @@ function cadGraph(){
   cad.gain.connect(cad.an); cad.an.connect(actx.destination);
 }
 function cadLoad(item){
-  if(!item || !actx) return;
+  if(!CADENCES_ENABLED || !item || !actx) return;
   for(const v of Object.keys(CAD_VARIANTS)){
     const key=item.id+"-"+v; if(cad.bufs[key] || cad.loading[key]) continue;
     cad.loading[key]=fetch("audio/cadence/"+key+".mp3").then(r=>{ if(!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
@@ -664,9 +668,10 @@ function cadLoad(item){
   }
 }
 /** Fetch every sprite once so the service worker has them for offline use. */
-function cadPrefetchAll(){ for(const c of FormationCadences.all()) for(const v of Object.keys(CAD_VARIANTS)) fetch("audio/cadence/"+c.id+"-"+v+".mp3").catch(()=>{}); }
+function cadPrefetchAll(){ if(!CADENCES_ENABLED) return; for(const c of FormationCadences.all()) for(const v of Object.keys(CAD_VARIANTS)) fetch("audio/cadence/"+c.id+"-"+v+".mp3").catch(()=>{}); }
 const cadReady=item=>cad.dry || Object.keys(CAD_VARIANTS).every(v=>cad.bufs[item.id+"-"+v]);
 function cadStart(){
+  if(!CADENCES_ENABLED) return;
   cadGraph(); cad.failed=false; cad.item=cadById($("cadSel").value)||FormationCadences.all()[0];
   cad.on=true; cad.line=0; cad.half=0; cad.waiting=false; cad.waitPA=null; cad.bag=[]; cad.cpl=[]; cadUnduck();
   cadLoad(cad.item); if(!cad.dry) setTimeout(cadPrefetchAll, 1500);
@@ -929,6 +934,8 @@ pb.addEventListener("contextmenu",e=>e.preventDefault());
 $("sens").value=settings.sens;                                   // restore saved difficulty (default Recruit)
 $("sens").addEventListener("change",()=>{ settings.sens=$("sens").value; saveSens(settings.sens); });
 fillCadences(); buildReference();
+function cadApplyEnabled(){ $("cadBar").style.display=CADENCES_ENABLED?"":"none"; $("cadHelp").style.display=CADENCES_ENABLED?"":"none"; if(!CADENCES_ENABLED && cad.on) cadStop(); }
+cadApplyEnabled();
 
 /* ---------- Test hook (automated tests only; not used in normal play) ---------- */
 window.FG = {
@@ -987,5 +994,6 @@ window.FG = {
   get G(){return G;}, get F(){return F;}, clock, settings, frames, handleResult, get rec(){return rec;}, get sessionText(){return sessionText;},
   analyse:(id,t)=>{ micOK=true; return analyseInflection(CMD[id], t); }, pushFrame, setFloor:v=>{noiseFloor=v;},
   showAnalysis:a=>{ lastAnalysis=a; },
+  cadEnable(v){ CADENCES_ENABLED=!!v; cadApplyEnabled(); }, cadEnabled:()=>CADENCES_ENABLED,
   cad, cadEcho, cadNextItem, cadStart, cadStop, cadVariant, cadBleed, footOf:k=>footOf(k),
 };

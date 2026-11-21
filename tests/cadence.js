@@ -24,7 +24,14 @@ const ROOT=P.resolve(__dirname,'..');
  // ---- form up and march (headless, virtual clock)
  await p.evaluate(()=>{ FG.startHeadless('snake',true); FG.setRecOn(true); FG.settings.sens="none"; window.__noWalls=true;
    FG.cmd("fall in"); for(let i=0;i<80 && FG.phase()!=="formed";i++) FG.sim(250); FG.sim(300); FG.G.recruits.length=0;
-   FG.cad.dry=true; FG.cad.log=[]; FG.cadStart(); });
+   window.__audioReq=0; const of=window.fetch; window.fetch=(u,...a)=>{ if(/audio\/cadence/.test(String(u))) window.__audioReq++; return of(u,...a); }; });
+ // ---- disabled by default (CADENCES_ENABLED=false): no UI, no help card, nothing loads or plays
+ const dis=await p.evaluate(()=>{ FG.cad.log=[]; FG.cadStart(); FG.cmd("forward march"); FG.sim(6000); const r={en:FG.cadEnabled(), bar:getComputedStyle(document.getElementById("cadBar")).display, help:getComputedStyle(document.getElementById("cadHelp")).display,
+   on:FG.cad.on, lines:FG.cad.log.length, req:window.__audioReq, echo:FG.cadEcho("c 130 rolling down the strip")}; FG.cmd("platoon halt"); FG.sim(4000); return r; });
+ ck(!dis.en && dis.bar==="none" && dis.help==="none", "voiced cadences disabled: ♪ Cadences bar and help card hidden");
+ ck(!dis.on && dis.lines===0 && dis.req===0 && dis.echo===false, `disabled: Start does nothing, no lines, no audio fetched (${dis.req}), echo guard dormant`);
+ // ---- engine checks below run with the feature switched back on (kept working for re-enabling)
+ await p.evaluate(()=>{ FG.cadEnable(true); FG.cad.dry=true; FG.cad.log=[]; FG.cadStart(); });
  const off=await p.evaluate(()=>{ FG.sim(3000); return FG.cad.log.length; });
  ck(off===0, "at the halt the cadence waits (no line scheduled)");
  await p.evaluate(()=>{ FG.cmd("forward march"); FG.sim(20000); });
@@ -125,8 +132,8 @@ const ROOT=P.resolve(__dirname,'..');
  const ui=await p.evaluate(()=>({ grammar:GRAMMAR_PHRASES.some(g=>/rolling|granny|airborne|mama/.test(g)), headphones:/headphone|earbud/i.test(document.body.innerHTML+document.getElementById("main").textContent) }));
  ck(!ui.grammar, "no lyric words added to the recogniser grammar");
  ck(!ui.headphones, "no headphone advice anywhere");
- const p2=await b.newPage(); await p2.goto(`http://localhost:${port}/index.html`); const def=await p2.evaluate(()=>({on:FG.cad.on, label:document.getElementById("cadPlay").textContent}));
- ck(!def.on && /On/.test(def.label), "voiced cadence is off by default");
+ const p2=await b.newPage(); await p2.goto(`http://localhost:${port}/index.html`); const def=await p2.evaluate(()=>({on:FG.cad.on, en:FG.cadEnabled(), bar:getComputedStyle(document.getElementById("cadBar")).display}));
+ ck(!def.on && !def.en && def.bar==="none", "fresh page: voiced cadences disabled and hidden");
  ck(errs.length===0, "no page errors "+errs.join(" | "));
  await b.close(); srv.close();
  console.log(fails? `\n${fails} FAILED`:"\nALL PASS"); process.exit(fails?1:0);

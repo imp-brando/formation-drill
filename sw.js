@@ -1,10 +1,11 @@
 /* Formation Drill service worker: network first (edits go live immediately), cached copy when offline. */
-const CACHE="formation-drill-v1";
+const CACHE="formation-drill-v2";     // v2: drops any cadence audio cached by v1
 const CORE=["./","./index.html"];
 self.addEventListener("install", e=>{ e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)).then(()=>self.skipWaiting())); });
 self.addEventListener("activate", e=>{ e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())); });
 self.addEventListener("fetch", e=>{
   const req=e.request; if(req.method!=="GET" || new URL(req.url).origin!==location.origin) return;
+  if(new URL(req.url).pathname.includes("/audio/cadence/")) return;          // voiced cadences disabled: never cache their audio
   e.respondWith((async()=>{
     const cache=await caches.open(CACHE);
     try{

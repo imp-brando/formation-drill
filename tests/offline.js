@@ -13,12 +13,11 @@ const puppeteer=require('puppeteer-core'), {spawn}=require('child_process'), P=r
   await p.reload({waitUntil:'load'});
   const ctl=await p.evaluate(()=>!!navigator.serviceWorker.controller);
   ck(ctl, "service worker installed and controlling the page");
-  // voiced cadences: turning them on once (online) caches every sprite for offline use
-  await p.evaluate(async()=>{ cadPrefetchAll(); await new Promise(r=>setTimeout(r,2500)); });
+  // voiced cadences are disabled: their audio is never cached (even if something fetches it)
+  await p.evaluate(async()=>{ try{ await (await fetch("audio/cadence/c130-q116.mp3")).arrayBuffer(); }catch(_){} });
+  const cached=await p.evaluate(async()=>{ let n=0; for(const k of await caches.keys()){ const c=await caches.open(k); n+=(await c.keys()).filter(r=>/audio\/cadence/.test(r.url)).length; } return n; });
+  ck(cached===0, `cadence audio is not cached by the service worker (${cached} entries)`);
   await p.setOfflineMode(true);
-  const aud=await p.evaluate(async()=>{ const ids=FormationCadences.all().flatMap(c=>["q116","q136","d180"].map(v=>c.id+"-"+v)); let ok=0;
-    for(const k of ids){ try{ const r=await fetch("audio/cadence/"+k+".mp3"); if(r.ok && (await r.arrayBuffer()).byteLength>10000) ok++; }catch(_){} } return {ok, n:ids.length}; });
-  ck(aud.ok===aud.n, `offline: all ${aud.n} cadence sprites come from the cache (${aud.ok})`);
   await p.reload({waitUntil:'load'});
   const off=await p.evaluate(()=>({fg:!!window.FG, verdict:(document.getElementById('verdict')||{}).textContent}));
   ck(off.fg && /Fall in/.test(off.verdict||""), `offline reload: game loads from the cache (verdict "${off.verdict}")`);

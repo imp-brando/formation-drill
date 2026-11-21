@@ -97,15 +97,23 @@ function drawSoldier(s, phase, sq){
   const amp = pre ? clamp(s.spd,0,1.25) : clamp(s.spd/full, 0, 1.25);
   const halted = !pre && ((G.move==="halt" && F.mode!=="counter") || (G.phase && G.phase!=="formed"));
   const inPlace = !halted && marching() && amp<0.2;            // mark time, pivot, closing, waiting rank
-  const rightFile = sq===F.W-1;
+  const rightFile = sq===F.W-1;   // DRESS RIGHT: every file but the LEFT one raises the arm; all but the right file turn heads right
   const k = G.mode==="snake" ? 1.4 : 1.25;                   // sprites scaled up within the step so legs stay readable on the bigger field
   const vo=visOff(s), shuf=halted && (s.shuffle || now()<(s.shuffleUntil||0));
   ctx.save(); ctx.translate(s.x+vo[0],s.y+vo[1]); ctx.scale(k,k);
   drawBody(0,0,s.face+vo[2], halted?0:amp, shuf? (now()/250+s.id*0.37)%2 : phase, "#3e4a1c","#151905", {
     arm: G.cover ? s.arm : null, armReach:s.armReach, hipIv:F.interval, k,
-    posture:halted?G.posture:"attention", dress:G.dress && !rightFile, eyes:(G.eyes||G.dress) && !(marching() && rightFile && G.eyes) && !(G.dress && rightFile),
+    posture:halted?G.posture:"attention", dress:G.dress && sq!==0, look:lookAtSgt(s,halted), eyes:(G.eyes||G.dress) && !(marching() && rightFile && G.eyes) && !(G.dress && rightFile),
     lift: shuf? 0.6 : inPlace? 1-amp/0.2 : 0 });
   ctx.restore();
+}
+/** STAND AT EASE: head and eyes on the drill sergeant (tracks him), as an angle off the soldier's facing. */
+const LOOK_MAX=150*D2R;   // the DS is off the left flank, centred: front-rank men look back over the left shoulder (~110–130°)
+function lookAtSgt(s, halted){
+  if(!halted || G.posture!=="standease" || !G.sgt || (G.phase && G.phase!=="formed")) return null;
+  const want=Math.atan2(G.sgt.x-s.x, -(G.sgt.y-s.y));
+  const rel=((want-s.face)%(2*Math.PI)+3*Math.PI)%(2*Math.PI)-Math.PI;
+  return clamp(rel,-LOOK_MAX,LOOK_MAX);
 }
 /* COVER arm geometry (sprite units, before the sprite scale k): attaches at the left shoulder, ends in a
    hand; its fingertip stops ARM_GAP steps short of the neighbour's body (body radius BODY_R*k). */
@@ -155,11 +163,22 @@ function drawBody(x,y,h,amp,phase,fill,stroke,opt){
     ctx.strokeStyle=fill; ctx.lineWidth=0.09; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
     ctx.fillStyle="#d9b98c"; ctx.beginPath(); ctx.arc(ex,ey,ARM_HAND,0,Math.PI*2); ctx.fill();   // hand
   }
-  if(opt.dress){ ctx.strokeStyle=fill; ctx.lineWidth=0.09; ctx.beginPath(); ctx.moveTo(x-n[0]*.15,y-n[1]*.15); ctx.lineTo(x-n[0]*.62,y-n[1]*.62); ctx.stroke(); }
+  if(opt.dress){                                           // DRESS RIGHT: left arm out to the left, a tiny gap short of the man on the left
+    const g=armGeom(F.interval, opt.k||1, "lat"), sx=x-n[0]*ARM_SH, sy=y-n[1]*ARM_SH, ex=sx-n[0]*g, ey=sy-n[1]*g;
+    ctx.strokeStyle="#151905"; ctx.lineWidth=0.15; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
+    ctx.strokeStyle=fill; ctx.lineWidth=0.09; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
+    ctx.fillStyle="#d9b98c"; ctx.beginPath(); ctx.arc(ex,ey,ARM_HAND,0,Math.PI*2); ctx.fill();
+  }
   ctx.fillStyle=fill; ctx.strokeStyle=stroke; ctx.lineWidth=0.05;
   ctx.beginPath(); ctx.arc(x,y,0.165,0,Math.PI*2); ctx.fill(); ctx.stroke();
-  const fd=dirV(h + (opt.eyes? 45*D2R : 0));               // face marker: eyes right turns it 45°
-  ctx.fillStyle="#e6dcc3"; ctx.beginPath(); ctx.arc(x+fd[0]*.11,y+fd[1]*.11,0.05,0,Math.PI*2); ctx.fill();
+  if(opt.look!=null){                                      // STAND AT EASE: head turned to the drill sergeant (bigger face + gaze line)
+    const fd=dirV(h+opt.look);
+    ctx.strokeStyle="#e6dcc3"; ctx.lineWidth=0.045; ctx.beginPath(); ctx.moveTo(x+fd[0]*.12,y+fd[1]*.12); ctx.lineTo(x+fd[0]*.34,y+fd[1]*.34); ctx.stroke();
+    ctx.fillStyle="#f4ecd6"; ctx.beginPath(); ctx.arc(x+fd[0]*.105,y+fd[1]*.105,0.07,0,Math.PI*2); ctx.fill();
+  } else {
+    const fd=dirV(h + (opt.eyes? 45*D2R : 0));             // face marker: eyes right turns it 45°
+    ctx.fillStyle="#e6dcc3"; ctx.beginPath(); ctx.arc(x+fd[0]*.11,y+fd[1]*.11,0.05,0,Math.PI*2); ctx.fill();
+  }
   if(opt.posture && opt.posture!=="attention"){ ctx.fillStyle="#120c05"; ctx.beginPath(); ctx.arc(x-d[0]*.21,y-d[1]*.21,0.05,0,Math.PI*2); ctx.fill(); } // hands behind back
 }
 
@@ -427,6 +446,8 @@ function dsError(why){
 }
 function judge(p, raw, heardAt, typed){
   const c=p.cmd, S=SENS[settings.sens];
+  // AT EASE: deliberately no effect at all (no posture change, no "!")
+  if(c.id==="atease"){ lastAnalysis={ok:true, detail:"At ease: no effect"}; return; }
   // No formation yet: only FALL IN counts (a one-part call here, no inflection check); every other
   // command is ignored with a quiet hint.
   if(G.phase && G.phase!=="formed" && G.mode!=="practice"){
@@ -833,6 +854,12 @@ window.FG = {
       return o; }); },
   visual:()=>allSoldiers().map(s=>{ const o=visOff(s); return {x:s.x,y:s.y,vx:s.x+o[0],vy:s.y+o[1],df:o[2]}; }),
   isBareExec,
+  look:()=>allSoldiers().map(s=>{ const halted=G.move==="halt" && F.mode!=="counter"; const L=lookAtSgt(s,halted); return L==null? null : {rel:L, gaze:s.face+L, toSgt:Math.atan2(G.sgt.x-s.x,-(G.sgt.y-s.y))}; }),
+  dressArms:()=>{ const k=G.mode==="snake"?1.4:1.25, sol=allSoldiers(), out=[];
+    F.ranks.forEach(rk=>rk.sol.forEach((s,q)=>{ if(!s) return; const o={q, arm:!!(G.dress && q!==0)};
+      if(o.arm){ const n=nrmV(s.face), g=armGeom(F.interval,k,"lat"), L=(ARM_SH+g+ARM_HAND)*k, tx=s.x-n[0]*L, ty=s.y-n[1]*L;
+        o.side=(tx-s.x)*n[0]+(ty-s.y)*n[1]; o.gap=Math.min(...sol.filter(z=>z!==s).map(z=>Math.hypot(z.x-tx,z.y-ty)-BODY_R*k)); }
+      out.push(o); })); return out; },
   // tests: skip the fall-in run
   formNow(){ if(G.phase==='scatter') startFallIn(); if(G.phase==='forming'){ for(const s of allSoldiers()){ s.arrived=true; const tg=slotTarget(s); s.x=tg.x; s.y=tg.y; } if(G.sgt) G.sgt.arrived=true; finishFallIn(); } },
   sgtRaw:()=>G.sgt && {x:G.sgt.x,y:G.sgt.y,face:G.sgt.face,corner:G.sgt.corner,run:!!G.sgt.run,post:G.sgt.post}, bounds:()=>scatterBounds(),

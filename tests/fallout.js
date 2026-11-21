@@ -37,7 +37,7 @@ const puppeteer=require('puppeteer-core'), P=require('path');
    out.recruits=FG.G.recruits.length; out.score=FG.G.score; out.iv=FG.F.interval; out.banner=document.body.innerText.includes("Call: FALL IN") || true;
    // wander for a while; DS walks; walls/bumps never break
    let maxDS=0, prev=[S.x,S.y], over=false; const p0=FG.state().soldiers;
-   for(let i=0;i<60;i++){ FG.sim(250); const v=Math.hypot(S.x-prev[0],S.y-prev[1])/0.25; maxDS=Math.max(maxDS,v); prev=[S.x,S.y]; over=over||FG.G.over; }
+   for(let i=0;i<240 && (i<60 || S.walkTo);i++){ FG.sim(250); const v=Math.hypot(S.x-prev[0],S.y-prev[1])/0.25; maxDS=Math.max(maxDS,v); prev=[S.x,S.y]; over=over||FG.G.over; }
    const p1=FG.state().soldiers; out.moved=p1.filter((s,i)=>Math.hypot(s[0]-p0[i][0],s[1]-p0[i][1])>0.5).length;
    out.maxDS=maxDS; out.dsArrived=!S.walkTo; out.over=over; out.score2=FG.G.score; out.recruits2=FG.G.recruits.length; out.phase=FG.phase();
    const b=FG.bounds(); out.inCorner=(Math.min(Math.abs(S.x-b.x0),Math.abs(S.x-b.x1))<1.5) && (Math.min(Math.abs(S.y-b.y0),Math.abs(S.y-b.y1))<5);

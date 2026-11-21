@@ -482,7 +482,8 @@ function analyseFrame(){
 function pushFrame(t, db, hz){
   frames.push({t, db, rel:db-noiseFloor, hz});
   while(frames.length && frames[0].t<t-8000) frames.shift();
-  if(db-noiseFloor>VOICE_REL) lastLoudT=t;
+  // loud = the player's voice; the cadence coming out of the speaker doesn't count
+  if(db-noiseFloor>VOICE_REL && !(typeof cadBleed==="function" && cadBleed(db))){ lastLoudT=t; if(typeof cadVoiceFrame==="function") cadVoiceFrame(t); }
   if(typeof burstCheck==="function") burstCheck(frames[frames.length-1]);
 }
 const VOICE_REL = 9;                                     // voiced = 9 dB above the noise floor

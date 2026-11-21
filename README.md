@@ -19,3 +19,6 @@ same game from the Pages site above, with an on-device drill-word recogniser ins
 - `src/part6.js`: detects the Android app's native voice bridge (`window.FGAndroid`); in a normal browser
   it does nothing.
 - Tests: `node tests/<name>.js` (puppeteer-core + Chrome).
+- Voiced cadences: lyrics in `src/part2.html` (traditional, public domain); audio sprites in `audio/cadence/`
+  made by `tools/gen_cadence.py` (Piper TTS + ffmpeg: one DS voice, the platoon a layered mix of 8 voices).
+  Each half-line is exactly 4 steps in variants for 116, 136 and 180 steps per minute; the game stretches it to the current tempo.

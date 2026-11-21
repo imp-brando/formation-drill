@@ -114,6 +114,7 @@ function execute(c, kE){
   if(window.__execLog) window.__execLog.push({id:c.id, t:now(), k, beatsNow});   // test hook
   const addl = !halted && ["halt","mark","halfstep","double","quick","change","colR","colL","colHR","colHL","rflank","lflank","rear","counter","forward"].includes(c.id);
   G.pendingAction={id:c.id, kE:k, actK: addl? k+1 : k, actT:null, actBeat:null};
+  if(typeof cadOnCommand==="function") cadOnCommand();          // the cadence stops, then picks up on a later left foot
   if(typeof picaaExec==="function") picaaExec(c, k, addl);
   const act=(kk,fn)=>{ if(kk<clock.k) fn(); else at(kk,fn); };   // run on beat kk (now if it has passed)
   const actionDone=()=>{ const pa=G.pendingAction; if(pa && !pa.actT){ pa.actT=now(); pa.actBeat=clock.k-1+clamp((now()-clock.lastT)/clock.period,0,1); } };

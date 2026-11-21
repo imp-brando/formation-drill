@@ -300,7 +300,8 @@ function handleResult(e){
   for(let i=e.resultIndex;i<e.results.length;i++){
     const res=e.results[i], key=session+":"+i, top=res[0].transcript.trim();
     $("heardTxt").textContent=top; $("heard").className="";
-    if(ttsBusy || now()<ttsQuietSince){ $("heardTxt").textContent="(ignored: cadence voice) "+top; continue; } // never obey our own TTS
+    if(cadEcho(top)){ $("heard").className="faint"; $("heardTxt").textContent="(cadence) "+top; consumedText.set(key, normText(top)); continue; } // never obey the cadence voice
+    if(cad.on) cadDuck();                                // the player is talking: duck the cadence
     let hit=null, firstFresh=null;
     const pend = pendingPrep && now()-pendingPrep.t<PREP_WAIT_MS ? pendingPrep.text : null;
     // score every alternative Chrome offers (alone, then joined to a prep heard just before); keep the best
@@ -337,7 +338,7 @@ function handleResult(e){
         dsError(`"${top}" with no preparatory command`);
       } else {
         // not a drill command: discard quietly (no flash, no penalty)
-        $("heard").className="faint"; $("heardTxt").textContent=top+" (ignored)";
+        $("heard").className="faint"; $("heardTxt").textContent=top+" (ignored)"; cadUnduck();
       }
       consumedText.set(key, normText(res[0].transcript));
     }
@@ -440,7 +441,7 @@ function onCommandHeard(p, raw){
 const BANG_MS=1000;
 function dsError(why){
   if(!G || G.mode==="practice") return;
-  G.bangT=now(); G.bangN=(G.bangN||0)+1;
+  G.bangT=now(); G.bangN=(G.bangN||0)+1; if(typeof cadUnduck==="function") cadUnduck();   // not executed: cadence carries on
   if(why) $("detail").textContent=why;
 }
 function judge(p, raw, heardAt, typed){
@@ -622,46 +623,155 @@ function picaaExec(c,kE,addl){
 function flash(msg,cls,detail){ const el=$("verdict"); el.className=cls; el.textContent=msg; $("detail").textContent=detail||""; }
 
 /* ======================================================================
-   CADENCE TOOLBAR: call and response, every call starting on the LEFT foot
+   VOICED CADENCES: the DS calls each line, the platoon sounds off (repeat after me).
+   Pre-generated sprites, audio/cadence/<id>-<variant>.mp3 (tools/gen_cadence.py): half-line i
+   (call = 2·line, response = 2·line+1) fills exactly 4 steps at the variant's tempo, with no gap.
+   Each half starts on a LEFT-foot strike, scheduled on the Web Audio clock one beat ahead, and
+   playbackRate stretches it to the current step period (quick time 112–144, double time 180).
+   Mic: echo guard (anything matching the lines just played is ignored), duck while the player
+   talks, interrupt on a command and pick up the same half-line on a later left foot once the
+   command has executed (or once marching restarts after a halt).
 ====================================================================== */
-const cad = { on:false, item:null, line:0, half:0, beat:-1 };
+const CAD_VARIANTS={q116:116, q136:136, d180:180};
+const CAD_DUCK=0.15, CAD_ECHO_MS=2500, CAD_BLEED_MARGIN=8, CAD_UNDUCK_MS=1800;
+const cad={ on:false, item:null, line:0, half:0, play:null, hist:[], bufs:{}, loading:{}, gain:null, an:null, anBuf:null,
+  shuffle:localStorage.getItem("formation.cadShuffle")==="1", vol:+(localStorage.getItem("formation.cadVol")??0.8),
+  lyrics:localStorage.getItem("formation.cadLyrics")!=="0", bag:[], ducked:false, lastTalk:-Infinity, waitPA:null, waiting:false,
+  cpl:[], outHist:[], voiceRun:0, lastVoiceF:-Infinity, testOut:null, dry:false, log:null };
+const cadById=id=>FormationCadences.all().find(c=>c.id===id);
 function fillCadences(){
-  const sel=$("cadSel"); sel.innerHTML="";
+  const sel=$("cadSel"), keep=sel.value; sel.innerHTML="";
   for(const c of FormationCadences.all()){ const o=document.createElement("option"); o.value=c.id; o.textContent=c.title+(c.tempo==="double"?" (double time)":""); sel.appendChild(o); }
-  cad.item=FormationCadences.all()[0]; renderCad();
+  if(keep && cadById(keep)) sel.value=keep;
+  if(!cad.on){ cad.item=cadById(sel.value)||FormationCadences.all()[0]; cad.line=0; cad.half=0; }
+  renderCad();
 }
 document.addEventListener("cadencepacks", fillCadences);
-function cadStart(){ cad.item=FormationCadences.all().find(c=>c.id===$("cadSel").value); cad.on=true; cad.line=0; cad.half=0; cad.beat=-1; $("cadPlay").textContent="Stop"; renderCad(); }
-function cadStop(){ cad.on=false; $("cadPlay").textContent="Start"; if(window.speechSynthesis) speechSynthesis.cancel(); ttsBusy=false; renderCad(); }
-function cadOnBeat(k){
-  if(!cad.on||!cad.item) return;
-  if(!marching() && G.mode!=="practice") return;            // the cadence pauses at the halt
-  if(cad.beat<0){ if(footOf(k)!=="L") return; cad.beat=0; } // start on the LEFT foot
-  else if(++cad.beat>=4){ cad.beat=0; cad.half^=1; if(cad.half===0) cad.line=(cad.line+1)%cad.item.lines.length; }
-  if(cad.beat===0){
-    const ln=cad.item.lines[cad.line], mode=$("cadVoice").value;
-    if(mode==="both" || (mode==="calls" && cad.half===0)) speak(cad.half===0?ln.c:ln.r);
+function cadVariant(){ return G && G.tempo==="double" ? "d180" : bpm()<126 ? "q116" : "q136"; }
+function cadGraph(){
+  ensureAudio(); if(!actx || cad.gain) return;
+  cad.gain=actx.createGain(); cad.gain.gain.value=cad.vol;
+  cad.an=actx.createAnalyser(); cad.an.fftSize=1024; cad.anBuf=new Float32Array(cad.an.fftSize);
+  cad.gain.connect(cad.an); cad.an.connect(actx.destination);
+}
+function cadLoad(item){
+  if(!item || !actx) return;
+  for(const v of Object.keys(CAD_VARIANTS)){
+    const key=item.id+"-"+v; if(cad.bufs[key] || cad.loading[key]) continue;
+    cad.loading[key]=fetch("audio/cadence/"+key+".mp3").then(r=>{ if(!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+      .then(a=>new Promise((ok,no)=>actx.decodeAudioData(a,ok,no))).then(b=>{ cad.bufs[key]=b; renderCad(); })
+      .catch(()=>{ delete cad.loading[key]; cad.failed=true; renderCad(); });
   }
-  renderCad();
+}
+/** Fetch every sprite once so the service worker has them for offline use. */
+function cadPrefetchAll(){ for(const c of FormationCadences.all()) for(const v of Object.keys(CAD_VARIANTS)) fetch("audio/cadence/"+c.id+"-"+v+".mp3").catch(()=>{}); }
+const cadReady=item=>cad.dry || Object.keys(CAD_VARIANTS).every(v=>cad.bufs[item.id+"-"+v]);
+function cadStart(){
+  cadGraph(); cad.failed=false; cad.item=cadById($("cadSel").value)||FormationCadences.all()[0];
+  cad.on=true; cad.line=0; cad.half=0; cad.waiting=false; cad.waitPA=null; cad.bag=[]; cad.cpl=[]; cadUnduck();
+  cadLoad(cad.item); if(!cad.dry) setTimeout(cadPrefetchAll, 1500);
+  $("cadPlay").textContent="■ Off"; $("cadPlay").classList.add("on"); renderCad();
+}
+function cadStop(){ cadKill(); cad.on=false; cad.waiting=false; cadUnduck(); $("cadPlay").textContent="▶ On"; $("cadPlay").classList.remove("on"); renderCad(); }
+/** Stop sound now; remember the unfinished half-line so it is played again from its start. */
+function cadKill(){
+  const p=cad.play; if(!p) return; cad.play=null;
+  if(now()<p.t1){ cad.item=p.item; cad.line=p.line; cad.half=p.half; const h=cad.hist[cad.hist.length-1]; if(h&&h.p===p) h.t1=now(); }
+  if(p.src){ try{ p.g.gain.setTargetAtTime(0, actx.currentTime, .015); p.src.stop(actx.currentTime+.08); }catch(_){} }
+}
+function cadNextItem(){
+  const all=FormationCadences.all(); if(all.length<2) return cad.item;
+  if(!cad.bag.length){ cad.bag=all.map(c=>c.id).sort(()=>Math.random()-.5); if(cad.bag[0]===cad.item.id) cad.bag.push(cad.bag.shift()); }
+  return cadById(cad.bag.shift());
+}
+function cadAdvance(){
+  cad.half^=1; if(cad.half) return;
+  if(++cad.line>=cad.item.lines.length){ cad.line=0; if(cad.shuffle){ cad.item=cadNextItem(); cadLoad(cad.item); $("cadSel").value=cad.item.id; } }
+}
+/** Called on every step strike k. The next strike (k+1) is at clock.nextT: schedule there. */
+function cadOnBeat(k){
+  if(!cad.on || !cad.item){ return; }
+  const active=(marching() && G.move!=="closing") || G.mode==="practice";
+  if(!active || G.over){ if(cad.play) cadKill(); renderCad(); return; }               // halted: pause here
+  if(cad.ducked && now()-cad.lastTalk>CAD_UNDUCK_MS && !(pendingPrep && now()-pendingPrep.t<PREP_WAIT_MS) && !armed) cadUnduck();
+  if(cad.waiting){                                                                   // a command is executing
+    const pa=cad.waitPA; if(pa && G.pendingAction===pa && !pa.actT && clock.k<=pa.actK+1) return;
+    cad.waiting=false; cad.waitPA=null;
+  }
+  const kn=k+1, T=clock.nextT;
+  if(footOf(kn)!=="L") return;                                                       // every half-line starts on the LEFT foot
+  if(cad.play && kn<cad.play.k0+4) return;                                           // current half still sounding
+  if(!cadReady(cad.item)) return;
+  const item=cad.item, line=cad.line, half=cad.half, v=cadVariant(), vb=CAD_VARIANTS[v], slot=240/vb;
+  const rate=clock.period*vb/60000, p={item, line, half, k0:kn, t0:T, t1:T+4*clock.period, v, rate, src:null, g:null};
+  if(!cad.dry && actx && cad.gain){
+    const buf=cad.bufs[item.id+"-"+v], ac=actx.currentTime;
+    let when=ac+(T-now())/1000-(actx.outputLatency||actx.baseLatency||0), off=(2*line+half)*slot;   // heard on the strike
+    if(when<ac){ off+=(ac-when)*rate; when=ac; }
+    const s=actx.createBufferSource(), g=actx.createGain(); s.buffer=buf; s.playbackRate.value=rate;
+    s.connect(g).connect(cad.gain); s.start(when, off, Math.max(.01,(2*line+half+1)*slot-off)); p.src=s; p.g=g;
+  }
+  cad.play=p; cad.hist.push({p, text:half?item.lines[line].r:item.lines[line].c, t0:T, t1:p.t1}); if(cad.hist.length>4) cad.hist.shift();
+  if(cad.log) cad.log.push({k:kn, foot:footOf(kn), t:T, id:item.id, line, half, v, rate, period:clock.period, tempo:G.tempo, prevEnd:cad.log.length?cad.log[cad.log.length-1].end:null, end:p.t1});
+  cadAdvance(); renderCad();
+}
+/** A command is about to execute: stop the cadence; resume the same half-line once it has. */
+function cadOnCommand(){ if(!cad.on) return; cadKill(); cad.waiting=true; cad.waitPA=G.pendingAction; cadUnduck(); renderCad(); }
+function cadSetGain(){ if(cad.gain) cad.gain.gain.setTargetAtTime(cad.vol*(cad.ducked?CAD_DUCK:1), actx.currentTime, cad.ducked?.03:.25); }
+function cadDuck(){ cad.lastTalk=now(); if(!cad.on || cad.ducked) return; cad.ducked=true; cadSetGain(); }
+function cadUnduck(){ if(!cad.ducked) return; cad.ducked=false; cadSetGain(); }
+/** Output level of the cadence (dBFS, peak-held 250 ms to cover the speaker→mic delay). */
+function cadOutDb(){
+  if(cad.testOut!==null) return cad.testOut;
+  if(!cad.an || !cad.play) return -Infinity;
+  cad.an.getFloatTimeDomainData(cad.anBuf); let s=0; for(const x of cad.anBuf) s+=x*x;
+  const t=now(), db=10*Math.log10(s/cad.anBuf.length+1e-12);
+  cad.outHist.push({t,db}); while(cad.outHist.length && cad.outHist[0].t<t-250) cad.outHist.shift();
+  return Math.max(...cad.outHist.map(o=>o.db));
+}
+/** Is this mic level explained by the cadence coming out of the speaker? Learns the speaker→mic
+    coupling (median mic−output level while not ducked); the player must be CAD_BLEED_MARGIN dB above it. */
+function cadBleed(db){
+  if(!cad.on) return false;
+  const out=cadOutDb(); if(!(out>-70)) return false;
+  const d=db-out; if(!cad.ducked){ cad.cpl.push(d); if(cad.cpl.length>160) cad.cpl.shift(); }
+  if(cad.cpl.length<12) return true;                                                 // still learning: assume it's us
+  const s=[...cad.cpl].sort((a,b)=>a-b), c=s[s.length>>1];
+  return db < out+c+CAD_BLEED_MARGIN;
+}
+/** The voice meter heard the player (not the cadence): duck after ~75 ms of voice. */
+function cadVoiceFrame(t){
+  if(!cad.on) return;
+  cad.voiceRun = t-cad.lastVoiceF<60 ? cad.voiceRun+1 : 1; cad.lastVoiceF=t;
+  if(cad.voiceRun>=3) cadDuck(); else if(cad.ducked) cad.lastTalk=now();
+}
+/** Echo guard: does this transcript match the cadence line(s) playing now (or just played)?
+    A command spoken over the lyric still counts: only words outside the lyric are parsed. */
+function cadEcho(text){
+  if(!cad.on) return false;
+  const t=now(), lyrics=[];
+  for(const h of cad.hist) if(h.t0-300<=t && t<=h.t1+CAD_ECHO_MS) lyrics.push(normText(h.text).split(" ").filter(Boolean));
+  if(!lyrics.length) return false;
+  const ws=normText(text).split(" ").filter(Boolean); if(!ws.length) return false;
+  const same=(a,b)=>a===b||a==="zzunk"||phonKey(a)===phonKey(b);
+  const inLyric=w=>lyrics.some(L=>L.some(x=>same(w,x)));
+  const frac=ws.filter(inLyric).length/ws.length; if(frac<0.6) return false;
+  // longest run of the transcript (from its start, or its end) that is a contiguous piece of a lyric
+  const run=(seq,rev)=>{ let best=0; for(const L0 of lyrics){ const L=rev?[...L0].reverse():L0; for(let s0=0;s0<L.length;s0++){ let k=0; while(k<seq.length && s0+k<L.length && same(seq[k],L[s0+k])) k++; best=Math.max(best,k); } } return best; };
+  const head=run(ws), tail=run([...ws].reverse(), true);
+  const rest1=ws.slice(head).join(" "), rest2=ws.slice(0,ws.length-tail).join(" ");
+  return !((rest1 && parseCommand(rest1)) || (rest2 && parseCommand(rest2)));   // a command outside the lyric is the player's
 }
 const esc=s=>String(s).replace(/[&<>"]/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[ch]));
 function renderCad(){
-  const box=$("cadLines");
-  if(!cad.item){ box.innerHTML=""; return; }
-  const ln=cad.item.lines[cad.line], nx=cad.item.lines[(cad.line+1)%cad.item.lines.length];
-  const dots=cad.on&&cad.beat>=0 ? "●".repeat(cad.beat+1)+"○".repeat(3-cad.beat) : "";
-  box.innerHTML=`<div class="call"><span class="${cad.on&&cad.half===0?"now":""}">${esc(ln.c)}</span></div>
-    <div class="resp"><span class="${cad.on&&cad.half===1?"now":""}">↳ ${esc(ln.r)}</span> <small>${dots}</small></div>
-    <div class="lic">Next: ${esc(nx.c)}<br>${esc(cad.item.license)} Source: ${esc(cad.item.source)}</div>`;
-}
-function speak(text){
-  if(!window.speechSynthesis) return;
-  const u=new SpeechSynthesisUtterance(text.replace(/…/g,","));
-  const words=text.split(/\s+/).length, secs=4*clock.period/1000;
-  u.rate=clamp(words/(secs*2.6),0.8,1.8); u.pitch=0.8;
-  ttsBusy=true;
-  u.onend=u.onerror=()=>{ ttsBusy=false; ttsQuietSince=now()+500; };  // also ignore the mic for 0.5 s after
-  speechSynthesis.speak(u);
+  const box=$("cadLines"); if(!box) return;
+  box.style.display=cad.lyrics?"":"none";
+  const it=cad.item; if(!it){ box.innerHTML=""; return; }
+  const p=cad.play && now()<cad.play.t1 ? cad.play : null, li=p?p.line:cad.line, hf=p?p.half:-1, ln=(p?p.item:it).lines[li];
+  const loading=cad.on && !cadReady(it), st= !cad.on ? "" : loading ? (cad.failed? "Voices not downloaded yet: turn cadences on once with a signal, then they work offline" : "Loading voices…") : cad.waiting ? "Executing command…" : !p ? "Starts on the next left foot while marching" : cad.ducked ? "Listening…" : "";
+  box.innerHTML=`<div class="call"><span class="${hf===0?"now":""}">${esc(ln.c)}</span></div>
+    <div class="resp"><span class="${hf===1?"now":""}">↳ ${esc(ln.r)}</span></div>
+    <div class="lic">${st?esc(st)+" · ":""}${esc((p?p.item:it).title)} · line ${li+1}/${(p?p.item:it).lines.length}${cad.shuffle?" · shuffle":""}<br>${esc(it.license)} Source: ${esc(it.source)}</div>`;
 }
 
 /* ======================================================================
@@ -799,9 +909,13 @@ $("btnQuit").onclick=()=>{ running=false; cadStop(); stopListening("🎙 Mic off
 $("ovBtn").onclick=async()=>{                                       // a tap (user gesture) turns the mic back on
   newGame(G.mode,{scatter:true}); flash("CALL FALL IN","ok",'Soldiers are scattered again. Say "Fall in" to form them up.');
   await resumeListening(); };
-$("cadToggle").onclick=()=>$("cadBar").classList.toggle("collapsed");
+$("cadToggle").onclick=()=>{ $("cadBar").classList.toggle("collapsed"); cadGraph(); };   // tap = user gesture: unlock Web Audio (Android WebView too)
 $("cadPlay").onclick=()=>cad.on?cadStop():cadStart();
-$("cadSel").onchange=()=>{ if(cad.on) cadStart(); else { cad.item=FormationCadences.all().find(c=>c.id===$("cadSel").value); cad.line=0; renderCad(); } };
+$("cadSel").onchange=()=>{ if(cad.on){ cadKill(); cad.item=cadById($("cadSel").value); cad.line=0; cad.half=0; cad.bag=[]; cadLoad(cad.item); } else { cad.item=cadById($("cadSel").value); cad.line=0; cad.half=0; } renderCad(); };
+$("cadShuf").onclick=()=>{ cad.shuffle=!cad.shuffle; cad.bag=[]; localStorage.setItem("formation.cadShuffle",cad.shuffle?"1":"0"); $("cadShuf").classList.toggle("on",cad.shuffle); $("cadShuf").setAttribute("aria-pressed",cad.shuffle); renderCad(); };
+$("cadShuf").classList.toggle("on",cad.shuffle); $("cadShuf").setAttribute("aria-pressed",cad.shuffle);
+$("cadVol").value=cad.vol; $("cadVol").oninput=()=>{ cad.vol=+$("cadVol").value; localStorage.setItem("formation.cadVol",cad.vol); cadSetGain(); };
+$("cadLyr").checked=cad.lyrics; $("cadLyr").onchange=()=>{ cad.lyrics=$("cadLyr").checked; localStorage.setItem("formation.cadLyrics",cad.lyrics?"1":"0"); renderCad(); };
 if(!SR) $("noSR").classList.add("on");
 if(DEBUG) $("debug").classList.add("on");
 const dbgSend=()=>{ const v=$("dbgIn").value, p=parseCommand(v); $("heardTxt").textContent=v; if(!p){ $("heardTxt").textContent=v+" (ignored)"; return; } judge(p,v,now(),true); $("dbgIn").value=""; };
@@ -873,4 +987,5 @@ window.FG = {
   get G(){return G;}, get F(){return F;}, clock, settings, frames, handleResult, get rec(){return rec;}, get sessionText(){return sessionText;},
   analyse:(id,t)=>{ micOK=true; return analyseInflection(CMD[id], t); }, pushFrame, setFloor:v=>{noiseFloor=v;},
   showAnalysis:a=>{ lastAnalysis=a; },
+  cad, cadEcho, cadNextItem, cadStart, cadStop, cadVariant, cadBleed, footOf:k=>footOf(k),
 };

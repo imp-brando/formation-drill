@@ -117,8 +117,11 @@ const CMDS = [
   {id:"dress", name:"Dress right, DRESS", exec:"DRESS", re:RIGHT, foot:null, when:"halt", desc:"Heads and eyes right, left arms extended. Soldiers align on the right file."},
   {id:"eyes", name:"Eyes, RIGHT", exec:"RIGHT", re:"(?:^|\\s)(?:eyes|eye|ice|i's|ayes|i)$", foot:"R", when:"any", desc:"Heads and eyes 45° right. While marching, the right file keeps looking to the front. Called as the right foot strikes."},
   {id:"front", name:"Ready, FRONT", exec:"FRONT", re:"ready|reddy|readi", foot:"L", when:"any", desc:"Ends Dress right or Eyes right. Called as the left foot strikes when marching."},
+  {id:"closeint", name:"At close interval, MARCH", exec:"MARCH", re:"close\\s*intervals?$", foot:null, when:"halt", desc:"At the halt. Every Soldier puts his RIGHT hand on his right hip, right elbow out to the right, touching the left side of the man to his right (no gap; the right-file man's elbow touches nothing). The right file stands fast; the others shuffle in toward it and align exactly. RECOVER drops the arms; the formation stays at close interval until Normal interval, COVER, or FALL IN."},
+  {id:"normint", name:"Normal interval, MARCH", exec:"MARCH", re:"normal\\s*intervals?$", foot:null, when:"halt", desc:"At the halt, only after At close interval. The right file stands fast and the others shuffle back out to the interval they had before At close interval. It only changes the interval: it does not straighten a ragged formation (that's COVER). COVER at close interval also restores normal interval."},
   {id:"cover", name:"COVER", exec:"COVER", re:"", single:true, foot:null, when:"halt", desc:"At the halt, in column. Left arms up at shoulder height: the front rank holds it straight out to the left side (except the front-left corner man, who has nobody to his left), everyone behind holds it straight forward toward the man ahead, stopping just short of him. Each Soldier aligns directly behind the man in front at the correct distance and holds until RECOVER."},
   {id:"recover", name:"RECOVER", exec:"RECOVER", re:"", single:true, foot:null, when:"halt", desc:"Ends COVER: arms snap down to the sides, back to attention, aligned. Only valid after COVER."},
+  {id:"fallout", name:"Fall, OUT", exec:"OUT", re:"", single:true, foot:null, when:"halt", desc:"At the halt, formed. The formation dissolves: soldiers break ranks and wander out of step (walls and bumps can't break anything), the drill sergeant walks to a new corner and watches. Score is kept, paused, no recruits. Call FALL IN to form up again (ragged, normal interval)."},
   {id:"fallin", name:"Fall, IN", exec:"IN", re:"fall", foot:null, when:"any", desc:"Forms the platoon in column at attention. Resets position, and restarts after Formation Broke."},
 ];
 const CMD = Object.fromEntries(CMDS.map(c=>[c.id,c]));
@@ -166,6 +169,8 @@ const KEYWORDS = {
   open:["open","opened","opens","opin","hoping","opun"],
   close:["close","clothes","closed","clove","cloves","clothe","cloze","clows","claus","klaus","clause"],
   ranks:["ranks","rank","rings","rank's","rinks","rants","wrinks","ranch","rang","rangs","racks"],
+  interval:["interval","intervals","interval's","intervale","intaval","intervol","innerval","interfal"],
+  normal:["normal","normally","normals","mormal","nermal"],
   extend:["extend","extent","extended","extends","extents","x10","xtend","attend","excellent"],
   forward:["forward","foreword","forwards","forword","fourward","forwad","forwarded","forewarned","onward"],
   backward:["backward","backwards","backwords","backword","backwoods"],
@@ -199,6 +204,8 @@ const REWRITES = [
   [/\b(?:ten|10|tin|tan|ton|then|den|a ten|atten|at ten|tensh|tench|tens|tense|tenn|tent) (?:hut|hot|hat|hood|hunt|huh|hutt|but|shut)\b/g,"tenhut"],
   [/\btenhut\b/g,"tenhut"],
   [/\b(?:fall|falls|fault|foal) (?:in|inn|and|end|en|on)\b/g,"fallin"],
+  [/\b(?:in trouble|in troubles|inter vals?|inner vals?|in a vols?|in travel|in tervals?)\b/g,"interval"],
+  [/\b(?:closin|closing|closen|clothing|closer)(?= interval)/g,"close"],
   [/\b(?:falling|fallen|fallin|follow in|for lin|fallon)\b/g,"fallin"],
   [/\b(?:per|pa|pur|purr|pare|pear|para) (?:aid|raid|rade|ade|rate|ray)\b/g,"parade"],
   [/\b(?:stand|stan|stands) (?:at|and|add|an|it|a) (?:ease|ees|easy|e's|these|is|e|ez|ys|eat)\b/g,"standatease"],
@@ -252,6 +259,8 @@ const PREP = {
     ["quick",    /(?:^| )quick time$/],
     ["openranks",/(?:^| )open ranks$/],
     ["closeranks",/(?:^| )close ranks$/],
+    ["closeint", /(?:^| )close interval$/],
+    ["normint",  /(?:^| )normal interval$/],
     ["extend",   /(?:^| )extend$/],
     ["close",    /^close$/],
     ["rear",     /(?:^| )rear$/],
@@ -302,6 +311,9 @@ function parseExact(text){
   const t=normalizeSpeech(text);
   const tok=t.split(" ").filter(Boolean);
   if(!tok.length) return null;
+  // FALL OUT: a one-part call, only when that is ALL that was said ("my phone fell out" is chatter)
+  { const r=String(text).toLowerCase().replace(/[^a-z ]/g,"").replace(/\s+/g," ").trim().replace(/^(?:platoon|squad|unit|flight) /,"");
+    if(/^(?:(?:fall|fal|fawl|fol|foll|fallen) ?(?:out|owt|aut|ought|at|outs)|fallout|fallouts|(?:ball|call|paul|hall) out)$/.test(r)) return {cmd:CMD.fallout, prep:""}; }
   // "Fall in" heard as a rhyme ("call in", "ball in", "paul in"...): only when that is ALL that was said
   if(/^(?:(?:platoon|squad|unit) )?(?:call|ball|paul|hall|fa|fah|fol|fawl|fallen|full|foll?) (?:in|inn|en|and)$/.test(t+"") || /^(?:(?:platoon|squad|unit) )?(?:call|ball|paul|hall|fa|fah|fol|fawl|full) (?:in|inn|en|and)$/.test(String(text).toLowerCase().replace(/[^a-z ]/g,"").replace(/\s+/g," ").trim())) return {cmd:CMD.fallin, prep:"fall"};
   // COVER / RECOVER: one-part calls, accepted only when that is ALL that was said (so "take cover" is chatter)

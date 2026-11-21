@@ -85,7 +85,7 @@ function canExecute(c){
   if(c.when==="march" && halted) return c.id.includes("flank")? "At the halt, use Right/Left, FACE" : c.id==="rear"? "At the halt, use About, FACE" : "Must be marching";
   if(["rstep","lstep","back"].includes(G.move) && !["halt","fallin"].includes(c.id)) return "Halt the formation first";
   const S=SENS[settings.sens];
-  const needsAttn = ["forward","colR","colL","colHR","colHL","counter","mark","double","rstep","lstep","back","rface","lface","aface","dress","openranks","closeranks","extend","close","eyes","cover"];
+  const needsAttn = ["forward","colR","colL","colHR","colHL","counter","mark","double","rstep","lstep","back","rface","lface","aface","dress","openranks","closeranks","extend","close","eyes","cover","closeint","normint"];
   if(halted && G.posture!=="attention" && needsAttn.includes(c.id)){
     if(S.needAttn) return "Call "+settings.unit+", ATTENTION first";
     G.posture="attention";
@@ -93,6 +93,8 @@ function canExecute(c){
   if(c.id==="counter" && F.W!==4) return "Counter column needs 4 files (column formation)";
   if(c.id==="quick" && G.tempo==="quick") return "Already at quick time";
   if(c.id==="extend" && F.interval===1) return "Already at normal interval";
+  if(c.id==="fallout" && G.mode==="practice") return "No FALL OUT in practice";
+  if(c.id==="normint" && !(F.closeIv && F.closeIv.axis==="interval")) return "Not at close interval. Call At close interval first";
   return null;
 }
 
@@ -110,6 +112,9 @@ function execute(c, kE){
   const act=(kk,fn)=>{ if(kk<clock.k) fn(); else at(kk,fn); };   // run on beat kk (now if it has passed)
   const actionDone=()=>{ const pa=G.pendingAction; if(pa && !pa.actT){ pa.actT=now(); pa.actBeat=clock.k-1+clamp((now()-clock.lastT)/clock.period,0,1); } };
   if(c.id==="cover"){ act(k,()=>{ startCover(); actionDone(); }); return; }
+  if(c.id==="normint"){ act(k,()=>{ normalInterval(); actionDone(); }); return; }
+  if(c.id==="fallout"){ act(k,()=>{ fallOut(); actionDone(); }); return; }
+  if(c.id==="closeint"){ act(k,()=>{ startCloseInterval(); actionDone(); }); return; }
   if(c.id==="recover"){ act(k,()=>{ doRecover(); actionDone(); }); return; }
   switch(c.id){
     case "forward":
@@ -165,7 +170,7 @@ function execute(c, kE){
     case "front": G.dress=false; G.eyes=false; break;
     case "openranks": animateSpacing("rankDist", 2); break;
     case "closeranks": animateSpacing("rankDist", 1); break;
-    case "extend": animateSpacing("interval", 1); break;
+    case "extend": F.closeIv=null; animateSpacing("interval", 1); break;
     case "close": animateSpacing("interval", 0.6); break;
     case "fallin": fallIn(); break;
   }
@@ -215,6 +220,7 @@ function flankTransform(d){
   const rd=F.interval, iv=F.rankDist; F.rankDist=rd; F.interval=iv;
   ranks2.forEach((rk,r)=>rk.s=300-r*F.rankDist);
   F.W=W2; F.ranks=ranks2.filter(rk=>rk.sol.some(Boolean)); F.cShift=0;
+  if(F.closeIv) F.closeIv.axis = F.closeIv.axis==="interval" ? "rankDist" : "interval";   // files became ranks
   // squads were files, now they're ranks (or back again). The squads' tail end is where the old rear rank went.
   F.inLine=!F.inLine; F.lineTail = F.inLine ? (d>0 ? 1 : -1) : 0;
   F._fi=null; fsAll();
@@ -251,7 +257,7 @@ function startCounterColumn(){
   G.busy="counter column";
   const W=4, iv=F.interval, D=F.ranks.length;
   // sq 0..3 = 1st..4th squad (1st squad = left file). Final lanes interleave the old ones so files pass cleanly.
-  const pre=[3,1,0,2], dir=[1,1,-1,-1], lanesTo=[2.0,1.0,0.0,-1.0];
+  const pre=[3,1,0,2], dir=[1,1,-1,-1], lanesTo=[2.0,1.0,0.0,-1.0].map(v=>v+(F.cShift||0));   // lanes may sit off the path centre (interval changed about the right file)
   const paths=[], headS=[], endS=[];
   for(let sq=0;sq<W;sq++){
     const lat=laneOf(sq), pts=[];
@@ -617,6 +623,7 @@ function scatterStart(){
 /** "Fall in" during the scatter: assign slots (nearest soldier to the base slot first), then hurry in. */
 function startFallIn(){
   if(G.phase!=="scatter") return false;
+  if(G.sgt) G.sgt.walkTo=null;
   G.phase="forming"; G.formT0=now();
   const slots=[];
   F.ranks.forEach((rk,r)=>rk.sol.forEach((s,q)=>{ if(s){ const p=filePos(q,rk.fs[q]); slots.push({r,q,x:p.x,y:p.y,h:p.h}); } }));
@@ -695,6 +702,30 @@ function finishFallIn(){
   flash("FORMED UP (RAGGED)","ok",'Call "COVER", then "RECOVER" to straighten them. Then "Forward… MARCH!"');
 }
 
+/** FALL OUT: the formation dissolves where it stands. Soldiers wander (pre-Fall-in behaviour), the drill
+    sergeant WALKS to a new random corner and watches. Score is kept (paused: no recruits, no walls). A fresh
+    4-wide formation at normal interval is what the next FALL IN forms on. */
+function fallOut(){
+  const old=allSoldiers().map(s=>({x:s.x,y:s.y,face:s.face})), n=old.length;
+  const S0=G.sgt && {x:G.sgt.x, y:G.sgt.y, face:G.sgt.face, corner:G.sgt.corner};
+  if(G.mode==="snake") F=makeFormation(SNAKE_W/2, Math.round(SNAKE_H*0.6), 0, 4, n); else F=makeFormation(0,0,0,4,n);
+  layoutSoldiers(0,true);
+  Object.assign(G, {move:"halt", tempo:"quick", posture:"attention", dress:false, eyes:false, sched:[], hitch:false, busy:null, prevMove:"forward",
+    recruits:[], pendingRecruits:0, cover:null, sloppy:false, dressT:null, phase:"scatter"});
+  sgtInit();
+  const b=scatterBounds();
+  allSoldiers().forEach((s,i)=>{ const o=old[i]; s.x=o.x; s.y=o.y; s.face=o.face; s.px=null; s.py=null; s.spd=0; s.trans=null; s.faceAnim=null;
+    s.slop=null; s.slopK=1; s.arm=null; s.shuffle=false; s.slot=null; s.arrived=null;
+    const h=o.face+(Math.random()-0.5)*Math.PI*1.2;
+    s.wander={h, v:STROLL_SPS*(0.6+Math.random()*0.6), turnAt:now()+600+Math.random()*2500, pauseUntil:now()+Math.random()*500}; s.walkPh=Math.random()*2; });
+  if(G.sgt){ const S=G.sgt; S.post={x:S.x,y:S.y,h:S.h};
+    let c; do{ c=Math.floor(Math.random()*4); } while(S0 && c===S0.corner);
+    const m=1.3; S.walkTo={x:(c&1)? b.x1-m : b.x0+m, y:(c&2)? b.y1-m : b.y0+(G.mode==="snake"? 4.5 : m+2)}; S.corner=c;
+    if(S0){ S.x=S0.x; S.y=S0.y; S.face=S0.face; } S.px=S.x; S.py=S.y; S.spd=0; S.arrived=false; }
+  updateHUD(); setStateTag();
+  flash("FALL OUT","ok",'They break ranks and wander. Score kept. Say "Fall in" to form them up again.');
+}
+const SGT_WALK_SPS=1.5;   // the drill sergeant walks (not double time) to his corner after FALL OUT
 /** Drill sergeant before the formation exists: still in his corner watching the group; on FALL IN he
     double-times to his post on the formation's LEFT flank, centred. */
 function sgtPreFormUpdate(dt){
@@ -702,8 +733,14 @@ function sgtPreFormUpdate(dt){
   const sol=allSoldiers(), sec=dt/1000;
   let cx=0, cy=0; sol.forEach(o=>{cx+=o.x; cy+=o.y;}); cx/=sol.length||1; cy/=sol.length||1;
   let want=S.face, vx=0, vy=0;
-  if(G.phase==="scatter") want=Math.atan2(cx-S.x, -(cy-S.y));               // watching the group
-  else if(!S.arrived && now()>=(S.goAt||0)){
+  let walking=false;
+  if(G.phase==="scatter" && S.walkTo){                                       // after FALL OUT: walk to his new corner
+    const dx=S.walkTo.x-S.x, dy=S.walkTo.y-S.y, d=Math.hypot(dx,dy);
+    if(d<0.05){ S.x=S.walkTo.x; S.y=S.walkTo.y; S.walkTo=null; }
+    else { const v=Math.min(SGT_WALK_SPS, d/sec); vx=dx/d*v; vy=dy/d*v; want=Math.atan2(vx,-vy); walking=true; }
+  }
+  if(G.phase==="scatter" && !walking) want=Math.atan2(cx-S.x, -(cy-S.y));    // watching the group
+  if(G.phase==="forming" && !S.arrived && now()>=(S.goAt||0)){
     const dx=S.post.x-S.x, dy=S.post.y-S.y, d=Math.hypot(dx,dy);
     if(d<0.06){ S.arrived=true; S.x=S.post.x; S.y=S.post.y; }
     else { const v=Math.min(FORM_SPS, d/sec*0.9); vx=dx/d*v; vy=dy/d*v;
@@ -714,7 +751,7 @@ function sgtPreFormUpdate(dt){
   if(S.arrived) want=S.post.h;
   S.x+=vx*sec; S.y+=vy*sec;
   const sp=Math.hypot(vx,vy); S.run=sp>1.2;
-  S.spd=lerp(S.spd||0, S.run?1.15:0, .25); S.walkPh=((S.walkPh||0)+(S.run? 3*sec : 0))%2;
+  S.spd=lerp(S.spd||0, S.run?1.15: walking? 0.8 : 0, .25); S.walkPh=((S.walkPh||0)+(S.run? 3*sec : walking? sp*sec/0.75 : 0))%2;
   let da=((want-S.face)%(2*Math.PI)+3*Math.PI)%(2*Math.PI)-Math.PI; S.face+=da*Math.min(1,dt/200);
   S.px=S.x; S.py=S.y;
 }
@@ -770,12 +807,50 @@ function assignArms(){
       s.arm="fwd";
       for(const o of sol) if(o!==s && Math.abs(rt(o)-rt(s))<0.4 && fw(o)>fw(s)+0.3) reach=Math.min(reach, Math.hypot(o.x-s.x,o.y-s.y));
     }
-    s.armReach = isFinite(reach) ? reach : 1;
+    // true grid distance (the interval may be changing right now): lateral = interval, forward = rank distance
+    s.armReach = isFinite(reach) ? (s.arm==="lat" ? F.interval : F.rankDist) : 1;
   }
 }
+/* ---------- Interval about the right file: the right flank file stands fast, the others move ---------- */
+const NORMAL_IV=1;
+/** Close interval: elbow (right hand on hip) touches the left side of the man to the right. In steps, centre to centre. */
+const CLOSE_IV=0.75;   // ≈ 4 in between shoulders (22 in centre to centre, 30-in step)
+function setIntervalRightFixed(iv, dur){
+  if(Math.abs(F.interval-iv)<1e-9) return false;
+  const old=allSoldiers().map(s=>[s,s.x,s.y]);
+  const L0=laneOf(F.W-1);                       // right file's lane offset stays put
+  F.interval=iv; F.cShift=L0/iv-(F.W-1)/2; F._fi=null;
+  for(const [s,x,y] of old) s.trans={x,y,t0:now(),dur:dur||COVER_MS*0.8};
+  return true;
+}
+/* F.closeIv = {prev, axis}: the formation is at close interval; prev = the interval before it closed.
+   A facing/flank turns files into ranks, so the closed spacing becomes the distance (axis "rankDist") and back. */
+function startCloseInterval(){
+  for(const s of allSoldiers()){ s.arm="hip"; s.armReach=null; }
+  if(!(F.closeIv && F.closeIv.axis==="interval")) F.closeIv={prev:F.interval, axis:"interval"};
+  setIntervalRightFixed(CLOSE_IV);
+  G.cover={t0:now(), hold:false, kind:"hip"};
+  for(const s of allSoldiers()){ if(!s.slop) s.slop=null; s.coverDelay=Math.random()*0.25; s.slopK0=s.slop?(s.slopK===undefined?1:s.slopK):0; s.shuffle=true; }
+  setStateTag && setStateTag();
+}
+/** Normal interval, MARCH: back to the interval before At close interval (right file fixed). Spacing only:
+    ragged soldiers stay ragged (COVER is what straightens them). */
+function normalInterval(){
+  const C=F.closeIv; if(!C) return;
+  setIntervalRightFixed(C.prev); F.closeIv=null;
+  const until=now()+COVER_MS*0.8; for(const s of allSoldiers()) s.shuffleUntil=until;
+}
+/** Undo close interval on whichever axis it is on now (used by COVER, which replaces Normal interval). */
+function restoreFromClose(){
+  const C=F.closeIv; if(!C) return;
+  if(C.axis==="interval") setIntervalRightFixed(C.prev);
+  else { animateSpacing("rankDist", C.prev); for(const s of allSoldiers()) if(s.trans) s.trans.dur=COVER_MS*0.8; }
+  F.closeIv=null;
+}
 function startCover(){
+  restoreFromClose();
   assignArms();
-  G.cover={t0:now(), hold:false};
+  G.cover={t0:now(), hold:false, kind:"cover"};
   for(const s of allSoldiers()){ if(!s.slop) s.slop=null; s.coverDelay=Math.random()*0.25; s.slopK0=s.slop?(s.slopK===undefined?1:s.slopK):0; }
   setStateTag && setStateTag();
 }
@@ -783,7 +858,7 @@ function coverUpdate(){
   const C=G.cover; if(!C || C.hold) return;
   const u=(now()-C.t0)/COVER_MS;
   for(const s of allSoldiers()){
-    if(!s.slop) continue;
+    if(!s.slop){ if(C.kind==="hip") s.shuffle = u<0.8; continue; }
     const v=clamp((u-s.coverDelay)/0.7,0,1);
     s.slopK=s.slopK0*(1-ease(v)); s.shuffle = v>0 && v<1;           // small shuffling steps while adjusting
   }

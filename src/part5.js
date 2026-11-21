@@ -99,10 +99,10 @@ function drawSoldier(s, phase, sq){
   const inPlace = !halted && marching() && amp<0.2;            // mark time, pivot, closing, waiting rank
   const rightFile = sq===F.W-1;
   const k = G.mode==="snake" ? 1.4 : 1.25;                   // sprites scaled up within the step so legs stay readable on the bigger field
-  const vo=visOff(s), shuf=halted && s.shuffle;
+  const vo=visOff(s), shuf=halted && (s.shuffle || now()<(s.shuffleUntil||0));
   ctx.save(); ctx.translate(s.x+vo[0],s.y+vo[1]); ctx.scale(k,k);
   drawBody(0,0,s.face+vo[2], halted?0:amp, shuf? (now()/250+s.id*0.37)%2 : phase, "#3e4a1c","#151905", {
-    arm: G.cover ? s.arm : null, armReach:s.armReach, k,
+    arm: G.cover ? s.arm : null, armReach:s.armReach, hipIv:F.interval, k,
     posture:halted?G.posture:"attention", dress:G.dress && !rightFile, eyes:(G.eyes||G.dress) && !(marching() && rightFile && G.eyes) && !(G.dress && rightFile),
     lift: shuf? 0.6 : inPlace? 1-amp/0.2 : 0 });
   ctx.restore();
@@ -116,6 +116,14 @@ function armGeom(reach, k, kind){
   // centre line by the shoulder offset, so it stops where it is R from his centre
   const tip = kind==="lat" ? reach-R-sh : reach-Math.sqrt(Math.max(0,R*R-sh*sh));
   return clamp(tip/k - ARM_HAND, 0.12, 0.62);
+}
+/* AT CLOSE INTERVAL arm (sprite units): RIGHT hand on the right hip, elbow out to the right. The elbow's
+   outer edge (round cap, half the outline width) touches the left side of the man to the right with zero gap:
+   |elbow - his centre| = (BODY_R + HIP_LW/2)·k, his centre being one interval to the right. */
+const HIP_SH=0.12, HIP_LW=0.15, HIP_BACK=0.05, HIP_HAND=[0.16,-0.07];
+function hipElbow(iv, k){
+  const R=(BODY_R+HIP_LW/2)*k, b=HIP_BACK*k;
+  return (iv - Math.sqrt(R*R-b*b))/k;          // elbow centre, lateral, sprite units
 }
 function drawBody(x,y,h,amp,phase,fill,stroke,opt){
   const d=dirV(h), n=nrmV(h);
@@ -134,7 +142,13 @@ function drawBody(x,y,h,amp,phase,fill,stroke,opt){
     ctx.fillStyle= lf>0.3? "#8a6a3a" : "#120c05";       // a raised boot shows lighter (knee up)
     ctx.beginPath(); ctx.ellipse(fx+d[0]*.03,fy+d[1]*.03,0.085+lf*.03,0.125+lf*.03,h,0,Math.PI*2); ctx.fill();
   }
-  if(opt.arm){                                             // COVER: LEFT arm out to the left side, or straight forward
+  if(opt.arm==="hip"){                                     // AT CLOSE INTERVAL: right hand on hip, elbow out right
+    const e=hipElbow(opt.hipIv||1, opt.k||1);
+    const pts=[[x+n[0]*HIP_SH, y+n[1]*HIP_SH], [x+n[0]*e-d[0]*HIP_BACK, y+n[1]*e-d[1]*HIP_BACK], [x+n[0]*HIP_HAND[0]+d[0]*HIP_HAND[1], y+n[1]*HIP_HAND[0]+d[1]*HIP_HAND[1]]];
+    ctx.lineJoin="round";
+    for(const [col,w] of [["#151905",HIP_LW],[fill,0.09]]){ ctx.strokeStyle=col; ctx.lineWidth=w; ctx.beginPath(); ctx.moveTo(...pts[0]); ctx.lineTo(...pts[1]); ctx.lineTo(...pts[2]); ctx.stroke(); }
+    ctx.fillStyle="#d9b98c"; ctx.beginPath(); ctx.arc(pts[2][0],pts[2][1],0.055,0,Math.PI*2); ctx.fill();   // hand on the hip
+  } else if(opt.arm){                                      // COVER: LEFT arm out to the left side, or straight forward
     const g=armGeom(opt.armReach, opt.k||1, opt.arm), v= opt.arm==="lat" ? [-n[0],-n[1]] : d;
     const sx=x-n[0]*ARM_SH, sy=y-n[1]*ARM_SH, ex=sx+v[0]*g, ey=sy+v[1]*g;
     ctx.strokeStyle="#151905"; ctx.lineWidth=0.15; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
@@ -202,7 +216,7 @@ let statusHoldUntil=0;   // keep "Heard … → understood as …" readable acro
 function setStatus(txt, cls, hold){ const el=$("srStatus"); if(!el) return; if(!hold && now()<statusHoldUntil && cls==="ok") return; el.textContent=txt; el.className=cls||""; statusHoldUntil = hold ? now()+hold : 0; }
 
 /* Grammar hint: Chrome mostly ignores it, but it's harmless and helps engines that use it. */
-const GRAMMAR_PHRASES=["column right march","column left march","column half right march","column half left march","counter column march","rear march","right flank march","left flank march","forward march","mark time march","half step march","change step march","double time march","quick time march","right step march","left step march","backward march","open ranks march","close ranks march","extend march","close march","platoon halt","platoon attention","right face","left face","about face","parade rest","stand at ease","at ease","dress right dress","eyes right","ready front","fall in"];
+const GRAMMAR_PHRASES=["column right march","column left march","column half right march","column half left march","counter column march","rear march","right flank march","left flank march","forward march","mark time march","half step march","change step march","double time march","quick time march","right step march","left step march","backward march","open ranks march","close ranks march","extend march","close march","at close interval march","normal interval march","at normal interval march","platoon halt","platoon attention","right face","left face","about face","parade rest","stand at ease","at ease","dress right dress","eyes right","ready front","fall in","fall out"];
 function addGrammar(r){
   try{
     const GL=window.SpeechGrammarList||window.webkitSpeechGrammarList; if(!GL) return;
@@ -799,10 +813,19 @@ window.FG = {
   addRecruit(){ addRecruitToFormation(); },
   phase:()=>G.phase,
   bang:()=>({on: !!(G.bangT && now()-G.bangT<BANG_MS), n:G.bangN||0, t:G.bangT||null}),
-  cover:()=>({cover:!!G.cover, hold:!!(G.cover&&G.cover.hold), sloppy:!!G.sloppy}),
+  cover:()=>({cover:!!G.cover, kind:G.cover?G.cover.kind:null, hold:!!(G.cover&&G.cover.hold), sloppy:!!G.sloppy, interval:F.interval, rankDist:F.rankDist}),
   arms:()=>{ const k=G.mode==="snake"?1.4:1.25, sol=allSoldiers();
     return sol.map(s=>{ const arm=G.cover? (s.arm||null) : null, o={x:s.x,y:s.y,face:s.face,arm};
-      if(arm){ const d=dirV(s.face), n=nrmV(s.face), v= arm==="lat"? [-n[0],-n[1]] : d, L=armGeom(s.armReach,k,arm);
+      if(arm==="hip"){ const d=dirV(s.face), n=nrmV(s.face), e=hipElbow(F.interval,k);
+        const ex=s.x+(n[0]*e-d[0]*HIP_BACK)*k, ey=s.y+(n[1]*e-d[1]*HIP_BACK)*k;    // elbow centre (world)
+        const hx=s.x+(n[0]*HIP_HAND[0]+d[0]*HIP_HAND[1])*k, hy=s.y+(n[1]*HIP_HAND[0]+d[1]*HIP_HAND[1])*k;
+        o.elbow=[ex,ey]; o.hand=[hx,hy]; o.side=(ex-s.x)*n[0]+(ey-s.y)*n[1]; o.ahead=(ex-s.x)*d[0]+(ey-s.y)*d[1];
+        o.handSide=(hx-s.x)*n[0]+(hy-s.y)*n[1]; o.handDist=Math.hypot(hx-s.x,hy-s.y)/k;
+        // gap from the elbow's outer edge to the nearest other body (negative = overlap)
+        let best=null; for(const q of sol){ if(q===s) continue; const g=Math.hypot(q.x-ex,q.y-ey)-(BODY_R+HIP_LW/2)*k; if(!best||g<best.g) best={g,q}; }
+        o.gap=best? best.g : Infinity;
+        if(best){ const q=best.q; o.touchSide=(q.x-s.x)*n[0]+(q.y-s.y)*n[1]; o.touchAhead=(q.x-s.x)*d[0]+(q.y-s.y)*d[1]; }
+      } else if(arm){ const d=dirV(s.face), n=nrmV(s.face), v= arm==="lat"? [-n[0],-n[1]] : d, L=armGeom(s.armReach,k,arm);
         const sx=s.x-n[0]*ARM_SH*k, sy=s.y-n[1]*ARM_SH*k, hx=sx+v[0]*L*k, hy=sy+v[1]*L*k;
         const tx=hx+v[0]*ARM_HAND*k, ty=hy+v[1]*ARM_HAND*k;               // fingertip
         o.tip=[tx,ty]; o.gap=Math.min(...sol.filter(q=>q!==s).map(q=>Math.hypot(q.x-tx,q.y-ty)-BODY_R*k));

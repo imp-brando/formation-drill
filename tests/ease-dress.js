@@ -13,6 +13,7 @@ const puppeteer=require('puppeteer-core'), P=require('path');
    const full=P.resolve(__dirname,'../shots/'+n.replace('-zoom','')+'.png'), out=P.resolve(__dirname,'../shots/'+n+'.png');
    require('child_process').execFileSync('/usr/bin/python3',['-c',`from PIL import Image; im=Image.open('${full}'); c=im.crop((${Math.round(c.x*2)},${Math.round(c.y*2)},${Math.round((c.x+c.width)*2)},${Math.round((c.y+c.height)*2)})); c.resize((c.width*3,c.height*3),Image.LANCZOS).save('${out}')`]); };
  await p.evaluate(()=>{ FG.startHeadless('snake',true); FG.setRecOn(true); FG.settings.sens="none"; FG.cmd("fall in"); for(let i=0;i<80 && FG.phase()!=="formed";i++) FG.sim(250); FG.sim(300); FG.G.recruits.length=0; FG.cmd("cover"); FG.sim(2600); FG.cmd("recover"); FG.sim(1200); });
+ await shot('ease-0-attention'); await zoom('ease-0-attention-zoom');
  ck(await p.evaluate(()=>FG.parse("at ease")==="atease" && FG.parse("stand at ease")==="standease"), "At ease and Stand at ease parse as different commands");
  // ---- At ease: no effect, no '!'
  const ae=await p.evaluate(()=>{ const b0=FG.bang().n, st=JSON.stringify(FG.state()), po=FG.G.posture; FG.cmd("at ease"); FG.sim(1500);

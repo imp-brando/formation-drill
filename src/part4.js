@@ -93,6 +93,12 @@ function canExecute(c){
   if(c.id==="counter" && F.W!==4) return "Counter column needs 4 files (column formation)";
   if(c.id==="quick" && G.tempo==="quick") return "Already at quick time";
   if(c.id==="extend" && F.interval===1) return "Already at normal interval";
+  if(c.id==="nsteps"){
+    if(G.posture!=="attention") return "Steps to the right/left: only from attention";
+    if(c.dir!=="R" && c.dir!=="L") return "Steps: only to the right or left";
+    if(c.n==null) return "Say how many steps (one to four)";
+    if(!(c.n>=1 && c.n<=4)) return "Steps: one to four only";
+  }
   if(c.id==="fallout" && G.mode==="practice") return "No FALL OUT in practice";
   if(c.id==="normint" && !(F.closeIv && F.closeIv.axis==="interval")) return "Not at close interval. Call At close interval first";
   return null;
@@ -159,6 +165,9 @@ function execute(c, kE){
       else { G.busy="counter column"; act(k+1,()=>{ if(G.move!=="forward") G.move="forward"; startCounterColumn(); actionDone(); }); }
       break;
     case "rstep": case "lstep": case "back": realignForStepOff(); G.move=c.id; break;
+    case "nsteps":                                  // N fifteen-inch steps, then halt on its own (attention)
+      realignForStepOff(); G.move = c.dir==="R" ? "rstep" : "lstep"; G.busy=c.n+(c.n===1?" step":" steps")+" to the "+(c.dir==="R"?"right":"left");
+      G.nstep={left:c.n*0.5, n:c.n, dir:c.dir}; actionDone(); break;
     case "rface": case "lface": flankTransform(c.id==="rface"?1:-1); break;
     case "aface": rearTransform(); break;
     case "parade": G.posture="parade"; G.dress=false; break;
@@ -361,7 +370,11 @@ function advance(dtBeats){
   if(G.move==="rstep"||G.move==="lstep"||G.move==="back"){
     const h=F.path.posAt(F.ranks[0].s).h;
     const v = G.move==="back"? dirV(h).map(x=>-x) : nrmV(h).map(x=>G.move==="rstep"?x:-x);
-    F.path.translate(v[0]*dist, v[1]*dist); return;
+    let dd=dist;
+    if(G.nstep){ dd=Math.min(dist, G.nstep.left); G.nstep.left-=dd; }
+    F.path.translate(v[0]*dd, v[1]*dd);
+    if(G.nstep && G.nstep.left<=1e-9){ G.nstep=null; G.move="halt"; G.busy=null; G.posture="attention"; setStateTag(); }
+    return;
   }
   if(dist<=0) return;
   const r0=F.ranks[0], W=F.W;
@@ -711,7 +724,7 @@ function fallOut(){
   if(G.mode==="snake") F=makeFormation(SNAKE_W/2, Math.round(SNAKE_H*0.6), 0, 4, n); else F=makeFormation(0,0,0,4,n);
   layoutSoldiers(0,true);
   Object.assign(G, {move:"halt", tempo:"quick", posture:"attention", dress:false, eyes:false, sched:[], hitch:false, busy:null, prevMove:"forward",
-    recruits:[], pendingRecruits:0, cover:null, sloppy:false, dressT:null, phase:"scatter"});
+    recruits:[], pendingRecruits:0, cover:null, sloppy:false, dressT:null, nstep:null, phase:"scatter"});
   sgtInit();
   const b=scatterBounds();
   allSoldiers().forEach((s,i)=>{ const o=old[i]; s.x=o.x; s.y=o.y; s.face=o.face; s.px=null; s.py=null; s.spd=0; s.trans=null; s.faceAnim=null;

@@ -121,6 +121,7 @@ const CMDS = [
   {id:"normint", name:"Normal interval, MARCH", exec:"MARCH", re:"normal\\s*intervals?$", foot:null, when:"halt", desc:"At the halt, only after At close interval. The right file stands fast and the others shuffle back out to the interval they had before At close interval. It only changes the interval: it does not straighten a ragged formation (that's COVER). COVER at close interval also restores normal interval."},
   {id:"cover", name:"COVER", exec:"COVER", re:"", single:true, foot:null, when:"halt", desc:"At the halt, in column. Left arms up at shoulder height: the front rank holds it straight out to the left side (except the front-left corner man, who has nobody to his left), everyone behind holds it straight forward toward the man ahead, stopping just short of him. Each Soldier aligns directly behind the man in front at the correct distance and holds until RECOVER."},
   {id:"recover", name:"RECOVER", exec:"RECOVER", re:"", single:true, foot:null, when:"halt", desc:"Ends COVER: arms snap down to the sides, back to attention, aligned. Only valid after COVER."},
+  {id:"nsteps", name:"(1–4) steps to the Right/Left, MARCH", exec:"MARCH", re:"", foot:null, when:"halt", desc:"From the halt at attention only. The formation takes 1 to 4 fifteen-inch steps to the right or left, keeps its facing, and halts on its own. Any other count (0, 5 or more, none) or direction, or calling it at any other moment, is a \"!\" and nothing moves."},
   {id:"fallout", name:"Fall, OUT", exec:"OUT", re:"", single:true, foot:null, when:"halt", desc:"At the halt, formed. The formation dissolves: soldiers break ranks and wander out of step (walls and bumps can't break anything), the drill sergeant walks to a new corner and watches. Score is kept, paused, no recruits. Call FALL IN to form up again (ragged, normal interval)."},
   {id:"fallin", name:"Fall, IN", exec:"IN", re:"fall", foot:null, when:"any", desc:"Forms the platoon in column at attention. Resets position, and restarts after Formation Broke."},
 ];
@@ -307,6 +308,31 @@ function matchPrep(cls, tokens){
 }
 
 /** Parse a transcript into {cmd, prep} or null, using the LAST execution word heard. */
+/* "(Number) steps to the right/left, MARCH". Parsed on the raw words (before drill-word rewrites) so the
+   count can't be lost or reinterpreted, and so "5 steps forward, march" can't sneak through as Forward, MARCH.
+   Returns a copy of CMD.nsteps with n (null = no count heard) and dir ("R"/"L", or "bad" for any other way).
+   Range/direction checks happen in canExecute, so a wrong count is the DS "!" rather than silence. */
+const NSTEP_NUM={zero:0,oh:0,"0":0,none:0,one:1,won:1,wan:1,"1":1,two:2,to:2,too:2,tu:2,"2":2,three:3,tree:3,free:3,thre:3,"3":3,
+  four:4,for:4,fore:4,fo:4,foe:4,"4":4,five:5,"5":5,six:6,sicks:6,"6":6,seven:7,"7":7,eight:8,ate:8,"8":8,nine:9,"9":9,ten:10,"10":10,
+  eleven:11,twelve:12,fifteen:15,twenty:20,thirty:30,fifty:50,hundred:100,thousand:1000,million:1e6};
+const NSTEP_DIR={right:"R",write:"R",rite:"R",ride:"R",wright:"R",rye:"R",ri:"R",rights:"R",
+  left:"L",lef:"L",lift:"L",laugh:"L",lefts:"L",leff:"L",
+  forward:"bad",forwards:"bad",front:"bad",ahead:"bad",rear:"bad",back:"bad",backward:"bad",backwards:"bad",up:"bad",down:"bad",around:"bad",center:"bad",middle:"bad",side:"bad"};
+function parseNSteps(text, needExec){
+  let tok=String(text||"").toLowerCase().replace(/[‘’`']/g,"").replace(/[^a-z0-9 ]+/g," ").replace(/\b(\d+)(?=[a-z])/g,"$1 ").split(/\s+/).filter(Boolean);
+  if(tok.length && UNIT_SET.has(tok[0])) tok=tok.slice(1);
+  if(needExec){ const last=tok[tok.length-1]; if(!last || !(execClassesOf(last)||[]).includes("MARCH")) return null; tok=tok.slice(0,-1); }
+  let i=0, n=null;
+  if(tok[i]!==undefined && /^\d+$/.test(tok[i])){ n=+tok[i]; i++; }
+  else if(tok[i]!==undefined && tok[i] in NSTEP_NUM && /^(?:steps?|stepped|stops?|steppes|stepps|staps?)$/.test(tok[i+1]||"")){ n=NSTEP_NUM[tok[i]]; i++; }
+  else if(tok[i]==="a"||tok[i]==="an"||tok[i]==="some"||tok[i]==="few"||tok[i]==="couple"){ i++; }      // no count given
+  if(!/^(?:steps?|stepped|stops?|steppes|stepps|staps?)$/.test(tok[i]||"")) return null;
+  i++;
+  while(["to","too","two","the","da","tha","tuh","de"].includes(tok[i])) i++;
+  const dir=NSTEP_DIR[tok[i]]; if(!dir) return null; i++;
+  if(i!==tok.length) return null;                                    // anything else after it: chatter
+  return Object.assign(Object.create(CMD.nsteps), {n, dir});
+}
 function parseExact(text){
   const t=normalizeSpeech(text);
   const tok=t.split(" ").filter(Boolean);
@@ -348,6 +374,7 @@ function parseExact(text){
 }
 /** A preparatory command with no execution word yet (e.g. Android ended the session at the pause). */
 function parsePrepOnly(text){
+  const ns=parseNSteps(text,false); if(ns) return ns;
   const tok=normalizeSpeech(text).split(" ").filter(Boolean);
   if(!tok.length) return null;
   // "Platoon…" alone: the prep for HALT while marching, ATTENTION at the halt

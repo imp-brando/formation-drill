@@ -141,7 +141,7 @@ select{font-size:14px;padding:6px;border-radius:5px;background:var(--khaki-l);co
     <button id="btnRef">Command Reference</button>
   </div>
   <div class="card" style="font-size:12px">
-    <b>Quick list:</b> <b>Fall, IN (start here)</b> · <b>Fall, OUT</b> · <b>COVER</b> · <b>RECOVER</b> · <b>At close interval, MARCH</b> · <b>Normal interval, MARCH</b> · Forward, MARCH · Platoon, HALT · Column right/left, MARCH · Column half right/left, MARCH · Right/Left flank, MARCH · Rear, MARCH · Counter column, MARCH · Mark time, MARCH · Half step, MARCH · Quick/Double time, MARCH · Change step, MARCH · Right/Left step, MARCH · Backward, MARCH · Right/Left/About, FACE · Parade, REST · Stand at, EASE · AT EASE · Platoon, ATTENTION · Dress right, DRESS · Eyes, RIGHT · Ready, FRONT · Open/Close ranks, MARCH · Extend/Close, MARCH.
+    <b>Quick list:</b> <b>Fall, IN (start here)</b> · <b>Fall, OUT</b> · <b>COVER</b> · <b>RECOVER</b> · <b>At close interval, MARCH</b> · <b>Normal interval, MARCH</b> · Forward, MARCH · Platoon, HALT · Column right/left, MARCH · Column half right/left, MARCH · Right/Left flank, MARCH · Rear, MARCH · Counter column, MARCH · Mark time, MARCH · Half step, MARCH · Quick/Double time, MARCH · Change step, MARCH · Right/Left step, MARCH · <b>(1–4) steps to the Right/Left, MARCH</b> · Backward, MARCH · Right/Left/About, FACE · Parade, REST · Stand at, EASE · AT EASE · Platoon, ATTENTION · Dress right, DRESS · Eyes, RIGHT · Ready, FRONT · Open/Close ranks, MARCH · Extend/Close, MARCH.
     <br><br><b>Snake:</b> soldiers start scattered; say <b>"Fall in"</b> to form up (bumping walls before that doesn't count), then <b>"Cover"</b> and <b>"Recover"</b> to straighten the ragged ranks. Then pick up recruits (gold) to grow the formation. Marching into a wall or into your own formation = <b>FORMATION BROKE</b>.
     <br>High score: <b id="hiStart">0</b>
   </div>
@@ -417,6 +417,7 @@ const CMDS = [
   {id:"normint", name:"Normal interval, MARCH", exec:"MARCH", re:"normal\\s*intervals?$", foot:null, when:"halt", desc:"At the halt, only after At close interval. The right file stands fast and the others shuffle back out to the interval they had before At close interval. It only changes the interval: it does not straighten a ragged formation (that's COVER). COVER at close interval also restores normal interval."},
   {id:"cover", name:"COVER", exec:"COVER", re:"", single:true, foot:null, when:"halt", desc:"At the halt, in column. Left arms up at shoulder height: the front rank holds it straight out to the left side (except the front-left corner man, who has nobody to his left), everyone behind holds it straight forward toward the man ahead, stopping just short of him. Each Soldier aligns directly behind the man in front at the correct distance and holds until RECOVER."},
   {id:"recover", name:"RECOVER", exec:"RECOVER", re:"", single:true, foot:null, when:"halt", desc:"Ends COVER: arms snap down to the sides, back to attention, aligned. Only valid after COVER."},
+  {id:"nsteps", name:"(1–4) steps to the Right/Left, MARCH", exec:"MARCH", re:"", foot:null, when:"halt", desc:"From the halt at attention only. The formation takes 1 to 4 fifteen-inch steps to the right or left, keeps its facing, and halts on its own. Any other count (0, 5 or more, none) or direction, or calling it at any other moment, is a \"!\" and nothing moves."},
   {id:"fallout", name:"Fall, OUT", exec:"OUT", re:"", single:true, foot:null, when:"halt", desc:"At the halt, formed. The formation dissolves: soldiers break ranks and wander out of step (walls and bumps can't break anything), the drill sergeant walks to a new corner and watches. Score is kept, paused, no recruits. Call FALL IN to form up again (ragged, normal interval)."},
   {id:"fallin", name:"Fall, IN", exec:"IN", re:"fall", foot:null, when:"any", desc:"Forms the platoon in column at attention. Resets position, and restarts after Formation Broke."},
 ];
@@ -603,6 +604,31 @@ function matchPrep(cls, tokens){
 }
 
 /** Parse a transcript into {cmd, prep} or null, using the LAST execution word heard. */
+/* "(Number) steps to the right/left, MARCH". Parsed on the raw words (before drill-word rewrites) so the
+   count can't be lost or reinterpreted, and so "5 steps forward, march" can't sneak through as Forward, MARCH.
+   Returns a copy of CMD.nsteps with n (null = no count heard) and dir ("R"/"L", or "bad" for any other way).
+   Range/direction checks happen in canExecute, so a wrong count is the DS "!" rather than silence. */
+const NSTEP_NUM={zero:0,oh:0,"0":0,none:0,one:1,won:1,wan:1,"1":1,two:2,to:2,too:2,tu:2,"2":2,three:3,tree:3,free:3,thre:3,"3":3,
+  four:4,for:4,fore:4,fo:4,foe:4,"4":4,five:5,"5":5,six:6,sicks:6,"6":6,seven:7,"7":7,eight:8,ate:8,"8":8,nine:9,"9":9,ten:10,"10":10,
+  eleven:11,twelve:12,fifteen:15,twenty:20,thirty:30,fifty:50,hundred:100,thousand:1000,million:1e6};
+const NSTEP_DIR={right:"R",write:"R",rite:"R",ride:"R",wright:"R",rye:"R",ri:"R",rights:"R",
+  left:"L",lef:"L",lift:"L",laugh:"L",lefts:"L",leff:"L",
+  forward:"bad",forwards:"bad",front:"bad",ahead:"bad",rear:"bad",back:"bad",backward:"bad",backwards:"bad",up:"bad",down:"bad",around:"bad",center:"bad",middle:"bad",side:"bad"};
+function parseNSteps(text, needExec){
+  let tok=String(text||"").toLowerCase().replace(/[‘’`']/g,"").replace(/[^a-z0-9 ]+/g," ").replace(/\b(\d+)(?=[a-z])/g,"$1 ").split(/\s+/).filter(Boolean);
+  if(tok.length && UNIT_SET.has(tok[0])) tok=tok.slice(1);
+  if(needExec){ const last=tok[tok.length-1]; if(!last || !(execClassesOf(last)||[]).includes("MARCH")) return null; tok=tok.slice(0,-1); }
+  let i=0, n=null;
+  if(tok[i]!==undefined && /^\d+$/.test(tok[i])){ n=+tok[i]; i++; }
+  else if(tok[i]!==undefined && tok[i] in NSTEP_NUM && /^(?:steps?|stepped|stops?|steppes|stepps|staps?)$/.test(tok[i+1]||"")){ n=NSTEP_NUM[tok[i]]; i++; }
+  else if(tok[i]==="a"||tok[i]==="an"||tok[i]==="some"||tok[i]==="few"||tok[i]==="couple"){ i++; }      // no count given
+  if(!/^(?:steps?|stepped|stops?|steppes|stepps|staps?)$/.test(tok[i]||"")) return null;
+  i++;
+  while(["to","too","two","the","da","tha","tuh","de"].includes(tok[i])) i++;
+  const dir=NSTEP_DIR[tok[i]]; if(!dir) return null; i++;
+  if(i!==tok.length) return null;                                    // anything else after it: chatter
+  return Object.assign(Object.create(CMD.nsteps), {n, dir});
+}
 function parseExact(text){
   const t=normalizeSpeech(text);
   const tok=t.split(" ").filter(Boolean);
@@ -644,6 +670,7 @@ function parseExact(text){
 }
 /** A preparatory command with no execution word yet (e.g. Android ended the session at the pause). */
 function parsePrepOnly(text){
+  const ns=parseNSteps(text,false); if(ns) return ns;
   const tok=normalizeSpeech(text).split(" ").filter(Boolean);
   if(!tok.length) return null;
   // "Platoon…" alone: the prep for HALT while marching, ATTENTION at the halt
@@ -1120,6 +1147,7 @@ function fuzzyPrepOnly(text){
 rebuildAliasTemplates();
 /** Exact parser first; sound-alike matcher second. Learned phrases from "Train my voice" count exactly. */
 function parseCommand(text){
+  const ns=parseNSteps(text,true); if(ns) return {cmd:ns, prep:"", score:1, via:"exact"};
   const n=normT(text);
   for(const [id,list] of Object.entries(userAliases)) for(const ph of list||[]){ const a=normT(ph); if(a && (n===a || n.endsWith(" "+a))) return {cmd:CMD[id], prep:"", score:1, via:"your voice"}; }
   const p=parseExact(text); if(p) return Object.assign(p,{score:1, via:"exact"});
@@ -1221,6 +1249,12 @@ function canExecute(c){
   if(c.id==="counter" && F.W!==4) return "Counter column needs 4 files (column formation)";
   if(c.id==="quick" && G.tempo==="quick") return "Already at quick time";
   if(c.id==="extend" && F.interval===1) return "Already at normal interval";
+  if(c.id==="nsteps"){
+    if(G.posture!=="attention") return "Steps to the right/left: only from attention";
+    if(c.dir!=="R" && c.dir!=="L") return "Steps: only to the right or left";
+    if(c.n==null) return "Say how many steps (one to four)";
+    if(!(c.n>=1 && c.n<=4)) return "Steps: one to four only";
+  }
   if(c.id==="fallout" && G.mode==="practice") return "No FALL OUT in practice";
   if(c.id==="normint" && !(F.closeIv && F.closeIv.axis==="interval")) return "Not at close interval. Call At close interval first";
   return null;
@@ -1287,6 +1321,9 @@ function execute(c, kE){
       else { G.busy="counter column"; act(k+1,()=>{ if(G.move!=="forward") G.move="forward"; startCounterColumn(); actionDone(); }); }
       break;
     case "rstep": case "lstep": case "back": realignForStepOff(); G.move=c.id; break;
+    case "nsteps":                                  // N fifteen-inch steps, then halt on its own (attention)
+      realignForStepOff(); G.move = c.dir==="R" ? "rstep" : "lstep"; G.busy=c.n+(c.n===1?" step":" steps")+" to the "+(c.dir==="R"?"right":"left");
+      G.nstep={left:c.n*0.5, n:c.n, dir:c.dir}; actionDone(); break;
     case "rface": case "lface": flankTransform(c.id==="rface"?1:-1); break;
     case "aface": rearTransform(); break;
     case "parade": G.posture="parade"; G.dress=false; break;
@@ -1489,7 +1526,11 @@ function advance(dtBeats){
   if(G.move==="rstep"||G.move==="lstep"||G.move==="back"){
     const h=F.path.posAt(F.ranks[0].s).h;
     const v = G.move==="back"? dirV(h).map(x=>-x) : nrmV(h).map(x=>G.move==="rstep"?x:-x);
-    F.path.translate(v[0]*dist, v[1]*dist); return;
+    let dd=dist;
+    if(G.nstep){ dd=Math.min(dist, G.nstep.left); G.nstep.left-=dd; }
+    F.path.translate(v[0]*dd, v[1]*dd);
+    if(G.nstep && G.nstep.left<=1e-9){ G.nstep=null; G.move="halt"; G.busy=null; G.posture="attention"; setStateTag(); }
+    return;
   }
   if(dist<=0) return;
   const r0=F.ranks[0], W=F.W;
@@ -1839,7 +1880,7 @@ function fallOut(){
   if(G.mode==="snake") F=makeFormation(SNAKE_W/2, Math.round(SNAKE_H*0.6), 0, 4, n); else F=makeFormation(0,0,0,4,n);
   layoutSoldiers(0,true);
   Object.assign(G, {move:"halt", tempo:"quick", posture:"attention", dress:false, eyes:false, sched:[], hitch:false, busy:null, prevMove:"forward",
-    recruits:[], pendingRecruits:0, cover:null, sloppy:false, dressT:null, phase:"scatter"});
+    recruits:[], pendingRecruits:0, cover:null, sloppy:false, dressT:null, nstep:null, phase:"scatter"});
   sgtInit();
   const b=scatterBounds();
   allSoldiers().forEach((s,i)=>{ const o=old[i]; s.x=o.x; s.y=o.y; s.face=o.face; s.px=null; s.py=null; s.spd=0; s.trans=null; s.faceAnim=null;
@@ -2233,7 +2274,7 @@ let statusHoldUntil=0;   // keep "Heard … → understood as …" readable acro
 function setStatus(txt, cls, hold){ const el=$("srStatus"); if(!el) return; if(!hold && now()<statusHoldUntil && cls==="ok") return; el.textContent=txt; el.className=cls||""; statusHoldUntil = hold ? now()+hold : 0; }
 
 /* Grammar hint: Chrome mostly ignores it, but it's harmless and helps engines that use it. */
-const GRAMMAR_PHRASES=["column right march","column left march","column half right march","column half left march","counter column march","rear march","right flank march","left flank march","forward march","mark time march","half step march","change step march","double time march","quick time march","right step march","left step march","backward march","open ranks march","close ranks march","extend march","close march","at close interval march","normal interval march","at normal interval march","platoon halt","platoon attention","right face","left face","about face","parade rest","stand at ease","at ease","dress right dress","eyes right","ready front","fall in","fall out"];
+const GRAMMAR_PHRASES=["column right march","column left march","column half right march","column half left march","counter column march","rear march","right flank march","left flank march","forward march","mark time march","half step march","change step march","double time march","quick time march","right step march","left step march","backward march","open ranks march","close ranks march","extend march","close march","at close interval march","normal interval march","at normal interval march","platoon halt","platoon attention","right face","left face","about face","parade rest","stand at ease","at ease","dress right dress","eyes right","ready front","fall in","fall out","one step to the right march","two steps to the right march","three steps to the right march","four steps to the right march","one step to the left march","two steps to the left march","three steps to the left march","four steps to the left march"];
 function addGrammar(r){
   try{
     const GL=window.SpeechGrammarList||window.webkitSpeechGrammarList; if(!GL) return;

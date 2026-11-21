@@ -226,6 +226,7 @@ function fuzzyPrepOnly(text){
 rebuildAliasTemplates();
 /** Exact parser first; sound-alike matcher second. Learned phrases from "Train my voice" count exactly. */
 function parseCommand(text){
+  const ns=parseNSteps(text,true); if(ns) return {cmd:ns, prep:"", score:1, via:"exact"};
   const n=normT(text);
   for(const [id,list] of Object.entries(userAliases)) for(const ph of list||[]){ const a=normT(ph); if(a && (n===a || n.endsWith(" "+a))) return {cmd:CMD[id], prep:"", score:1, via:"your voice"}; }
   const p=parseExact(text); if(p) return Object.assign(p,{score:1, via:"exact"});
